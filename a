@@ -1,15 +1,24 @@
--- Fishing & Teleport GUI v3, with working instant attract/reel for custom RemoteEvent
+-- Fishing & Teleport GUI v4 - WORKING INSTANT FISH AND REEL FOR THIS GAME
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
--- Remote setup
 local remote = ReplicatedStorage:WaitForChild("ffrostflame_bridgenet2@1.0.0"):WaitForChild("dataRemoteEvent")
 local USER_ID = LocalPlayer.UserId
 
--- CONFIG: Set these per your net, you can make this dynamic if you want
-local FISH_PER_NET = 4           -- Max fish your net can hold (edit for your net)
+-- CONFIG: Set these per your net, or make them dynamic if you want
+local FISH_PER_NET = 4           -- Max fish your net can hold
 local TOTAL_REEL_PRESSES = 12    -- How many times you'd normally have to click to reel
+
+-- The latest vector position for the water, from your log
+local FISH_VECTOR = Vector3.new(283.98358154296875, 27.99997329711914, -204.96829223632812)
+
+-- List of fish to use, from your log. Can randomize or just cycle.
+local FISH_TYPES = {"RainbowTrout", "Perch", "Carp"}
+
+-- Float values to use (randomized or cycled)
+local FLOATS = {1.18, 1.35, 1.13, 1.71}
 
 -- Status
 local attractActive = false
@@ -252,35 +261,23 @@ populateTeleportTab(tabs[2], workspace:FindFirstChild("GameStalls"), Color3.from
 populateTeleportTab(tabs[3], workspace:FindFirstChild("Zones"), Color3.fromRGB(90,120,90))
 populateTeleportTab(tabs[4], ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("BossEvent"), Color3.fromRGB(90,90,120))
 
--- FISH LOGIC (NEW!)
+-- INSTANT FISH LOGIC
 local rng = Random.new()
-local FISH_TYPES = {"Carp", "Trout", "Salmon", "Bass", "Pike"} -- edit or expand as needed
-
-local function randomFish()
-    return FISH_TYPES[rng:NextInteger(1, #FISH_TYPES)]
-end
-
-local function randomVec()
-    return Vector3.new(
-        rng:NextNumber(200, 400),
-        rng:NextNumber(20, 40),
-        rng:NextNumber(-300, -150)
-    )
-end
-
 local function doInstantAttract()
     attractActive = true
     updateStatus()
-    -- Simulate all fish being caught instantly
+    -- Simulate all fish being caught instantly for your net
     for i = 1, FISH_PER_NET do
+        local fishType = FISH_TYPES[((i - 1) % #FISH_TYPES) + 1]
+        local floatValue = FLOATS[((i - 1) % #FLOATS) + 1]
         local args = {
             {
                 {
                     "FishCaptureEffect",
                     {
-                        randomFish(),
-                        rng:NextNumber(1,3),          -- random float
-                        randomVec(),
+                        fishType,
+                        floatValue,
+                        FISH_VECTOR,
                         USER_ID
                     }
                 },
@@ -288,7 +285,7 @@ local function doInstantAttract()
             }
         }
         remote:FireServer(unpack(args))
-        wait(0.2) -- Small delay to avoid anti-cheat, adjust as needed
+        wait(0.1)
     end
     attractActive = false
     updateStatus()
@@ -300,10 +297,10 @@ local function doInstantReel()
     -- Instantly do all reel clicks
     for i = 1, TOTAL_REEL_PRESSES do
         local args = {
-            {1, tostring(i)}
+            {1, "9"}
         }
         remote:FireServer(unpack(args))
-        wait(0.05) -- safe delay (20/s), adjust if needed
+        wait(0.05) -- safe delay (20/s)
     end
     reelActive = false
     updateStatus()
