@@ -1,17 +1,9 @@
---[[ 
-    Roblox Executor Script: Modern Fishing GUI
-    Features:
-    - Tabs: Fishing | Sell Areas | Zones | Boss Fights
-    - Minimize/Maximize
-    - Instant Attract/Reel buttons (no hotkeys needed, but C/R still work)
-    Place anywhere (does not need StarterPlayerScripts)
---]]
+-- Fishing & Teleport GUI v2 by dhshshehimhehehe-max
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
--- ========== FISHING LOGIC ==========
 local BridgeNet2 = require(ReplicatedStorage.Packages.BridgeNet2)
 local Net_ForcePull = BridgeNet2.ReferenceBridge("Net_ForcePull")
 local Net_ReelDelta = BridgeNet2.ReferenceBridge("Net_ReelDelta")
@@ -19,6 +11,10 @@ local Net_ReelDelta = BridgeNet2.ReferenceBridge("Net_ReelDelta")
 local MAX_REEL_PER_SECOND = 20
 local TOTAL_REEL_PRESSES = 12
 local INSTANT_COLLECT_FISH = 4
+
+-- Feature status
+local attractActive = false
+local reelActive = false
 
 local function getNettingController()
     if getgc then
@@ -44,7 +40,20 @@ local function getState(controller)
     return nil
 end
 
+local function updateStatus()
+    if attractStatus then
+        attractStatus.Text = attractActive and "ON" or "OFF"
+        attractStatus.TextColor3 = attractActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
+    end
+    if reelStatus then
+        reelStatus.Text = reelActive and "ON" or "OFF"
+        reelStatus.TextColor3 = reelActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
+    end
+end
+
 local function instantCollect()
+    attractActive = true
+    updateStatus()
     local controller = getNettingController()
     local state = getState(controller)
     if state == "Collecting" then
@@ -53,9 +62,13 @@ local function instantCollect()
             wait(0.05)
         end
     end
+    attractActive = false
+    updateStatus()
 end
 
 local function instantReel()
+    reelActive = true
+    updateStatus()
     local controller = getNettingController()
     local state = getState(controller)
     if state == "Reeling" then
@@ -64,9 +77,11 @@ local function instantReel()
             wait(1 / MAX_REEL_PER_SECOND)
         end
     end
+    reelActive = false
+    updateStatus()
 end
 
--- ========== GUI SETUP ==========
+-- GUI Setup
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FishingGUI"
 screenGui.ResetOnSpawn = false
@@ -119,29 +134,6 @@ maxBtn.Parent = titleBar
 
 local minimized = false
 
-minBtn.MouseButton1Click:Connect(function()
-    minimized = true
-    for _, tab in ipairs(window:GetChildren()) do
-        if tab:IsA("Frame") and tab ~= titleBar then
-            tab.Visible = false
-        end
-    end
-    window.Size = UDim2.new(0,420,0,38)
-end)
-maxBtn.MouseButton1Click:Connect(function()
-    minimized = false
-    window.Size = UDim2.new(0,420,0,320)
-    for i, tab in ipairs(window:GetChildren()) do
-        if tab:IsA("Frame") and tab ~= titleBar then
-            tab.Visible = false
-        end
-    end
-    if window:FindFirstChild("FishingTab") then
-        window.FishingTab.Visible = true
-    end
-end)
-
--- Tabs & Buttons
 local tabBtnHolder = Instance.new("Frame")
 tabBtnHolder.Size = UDim2.new(1, 0, 0, 38)
 tabBtnHolder.Position = UDim2.new(0,0,0,38)
@@ -173,194 +165,149 @@ for i, tabName in ipairs(tabNames) do
     tabs[i] = tab
 end
 
--- Fishing Tab
-do
-    local tab = tabs[1]
-    local attractBtn = Instance.new("TextButton")
-    attractBtn.Text = "Instant Attract Fish"
-    attractBtn.Font = Enum.Font.GothamBold
-    attractBtn.TextSize = 16
-    attractBtn.Size = UDim2.new(0, 370, 0, 40)
-    attractBtn.Position = UDim2.new(0, 25, 0, 35)
-    attractBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 90)
-    attractBtn.TextColor3 = Color3.new(1,1,1)
-    attractBtn.Parent = tab
-    attractBtn.MouseButton1Click:Connect(function()
-        instantCollect()
-    end)
-
-    local reelBtn = Instance.new("TextButton")
-    reelBtn.Text = "Instant Reel"
-    reelBtn.Font = Enum.Font.GothamBold
-    reelBtn.TextSize = 16
-    reelBtn.Size = UDim2.new(0, 370, 0, 40)
-    reelBtn.Position = UDim2.new(0, 25, 0, 85)
-    reelBtn.BackgroundColor3 = Color3.fromRGB(60, 130, 250)
-    reelBtn.TextColor3 = Color3.new(1,1,1)
-    reelBtn.Parent = tab
-    reelBtn.MouseButton1Click:Connect(function()
-        instantReel()
-    end)
-
-    local info = Instance.new("TextLabel")
-    info.Text = "Press the buttons above to instantly attract fish or reel in.\n(C and R hotkeys still work)"
-    info.Font = Enum.Font.Gotham
-    info.TextSize = 14
-    info.Size = UDim2.new(1, -20, 0, 40)
-    info.Position = UDim2.new(0, 10, 0, 135)
-    info.TextColor3 = Color3.new(1,1,1)
-    info.BackgroundTransparency = 1
-    info.Parent = tab
-end
-
--- Sell Teleport Tab
-do
-    local tab = tabs[2]
-    local src = workspace:FindFirstChild("GameStalls")
-    if src then
-        local y = 10
-        for _, obj in pairs(src:GetChildren()) do
-            if obj:IsA("BasePart") or obj:IsA("Model") then
-                local btn = Instance.new("TextButton")
-                btn.Size = UDim2.new(0, 370, 0, 35)
-                btn.Position = UDim2.new(0, 25, 0, y)
-                btn.Text = "Teleport to "..obj.Name
-                btn.BackgroundColor3 = Color3.fromRGB(120,90,90)
-                btn.TextColor3 = Color3.new(1,1,1)
-                btn.Font = Enum.Font.Gotham
-                btn.TextSize = 16
-                btn.Parent = tab
-                y = y + 40
-                btn.MouseButton1Click:Connect(function()
-                    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                    if obj:IsA("BasePart") then
-                        char:MoveTo(obj.Position)
-                    elseif obj:IsA("Model") and obj.PrimaryPart then
-                        char:MoveTo(obj.PrimaryPart.Position)
-                    else
-                        local part = obj:FindFirstChildWhichIsA("BasePart")
-                        if part then
-                            char:MoveTo(part.Position)
-                        end
-                    end
-                end)
-            end
-        end
-    else
-        local txt = Instance.new("TextLabel")
-        txt.Text = "No GameStalls found!"
-        txt.Size = UDim2.new(1,0,0,40)
-        txt.Position = UDim2.new(0,0,0,10)
-        txt.Font = Enum.Font.Gotham
-        txt.TextColor3 = Color3.fromRGB(200,50,50)
-        txt.BackgroundTransparency = 1
-        txt.Parent = tab
-    end
-end
-
--- Zone Teleport Tab
-do
-    local tab = tabs[3]
-    local src = workspace:FindFirstChild("Zones")
-    if src then
-        local y = 10
-        for _, obj in pairs(src:GetChildren()) do
-            if obj:IsA("BasePart") or obj:IsA("Model") then
-                local btn = Instance.new("TextButton")
-                btn.Size = UDim2.new(0, 370, 0, 35)
-                btn.Position = UDim2.new(0, 25, 0, y)
-                btn.Text = "Teleport to "..obj.Name
-                btn.BackgroundColor3 = Color3.fromRGB(90,120,90)
-                btn.TextColor3 = Color3.new(1,1,1)
-                btn.Font = Enum.Font.Gotham
-                btn.TextSize = 16
-                btn.Parent = tab
-                y = y + 40
-                btn.MouseButton1Click:Connect(function()
-                    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                    if obj:IsA("BasePart") then
-                        char:MoveTo(obj.Position)
-                    elseif obj:IsA("Model") and obj.PrimaryPart then
-                        char:MoveTo(obj.PrimaryPart.Position)
-                    else
-                        local part = obj:FindFirstChildWhichIsA("BasePart")
-                        if part then
-                            char:MoveTo(part.Position)
-                        end
-                    end
-                end)
-            end
-        end
-    else
-        local txt = Instance.new("TextLabel")
-        txt.Text = "No Zones found!"
-        txt.Size = UDim2.new(1,0,0,40)
-        txt.Position = UDim2.new(0,0,0,10)
-        txt.Font = Enum.Font.Gotham
-        txt.TextColor3 = Color3.fromRGB(200,50,50)
-        txt.BackgroundTransparency = 1
-        txt.Parent = tab
-    end
-end
-
--- Boss Teleport Tab
-do
-    local tab = tabs[4]
-    local BossEvent = ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("BossEvent")
-    if BossEvent then
-        local y = 10
-        for _, obj in pairs(BossEvent:GetChildren()) do
-            if obj:IsA("BasePart") or obj:IsA("Model") then
-                local btn = Instance.new("TextButton")
-                btn.Size = UDim2.new(0, 370, 0, 35)
-                btn.Position = UDim2.new(0, 25, 0, y)
-                btn.Text = "Teleport to "..obj.Name
-                btn.BackgroundColor3 = Color3.fromRGB(90,90,120)
-                btn.TextColor3 = Color3.new(1,1,1)
-                btn.Font = Enum.Font.Gotham
-                btn.TextSize = 16
-                btn.Parent = tab
-                y = y + 40
-                btn.MouseButton1Click:Connect(function()
-                    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                    if obj:IsA("BasePart") then
-                        char:MoveTo(obj.Position)
-                    elseif obj:IsA("Model") and obj.PrimaryPart then
-                        char:MoveTo(obj.PrimaryPart.Position)
-                    else
-                        local part = obj:FindFirstChildWhichIsA("BasePart")
-                        if part then
-                            char:MoveTo(part.Position)
-                        end
-                    end
-                end)
-            end
-        end
-    else
-        local txt = Instance.new("TextLabel")
-        txt.Text = "No BossEvent found!"
-        txt.Size = UDim2.new(1,0,0,40)
-        txt.Position = UDim2.new(0,0,0,10)
-        txt.Font = Enum.Font.Gotham
-        txt.TextColor3 = Color3.fromRGB(200,50,50)
-        txt.BackgroundTransparency = 1
-        txt.Parent = tab
-    end
-end
-
--- Tab switching
+-- Fix: Tabs always visible after maximize
 local function showTab(idx)
     if minimized then return end
     for i, tab in ipairs(tabs) do
         tab.Visible = (i == idx)
     end
+    tabBtnHolder.Visible = true
 end
 for i, btn in ipairs(tabBtns) do
     btn.MouseButton1Click:Connect(function()
         showTab(i)
     end)
 end
+
+minBtn.MouseButton1Click:Connect(function()
+    minimized = true
+    for _, tab in ipairs(tabs) do tab.Visible = false end
+    tabBtnHolder.Visible = false
+    window.Size = UDim2.new(0,420,0,38)
+end)
+maxBtn.MouseButton1Click:Connect(function()
+    minimized = false
+    window.Size = UDim2.new(0,420,0,320)
+    tabBtnHolder.Visible = true
+    showTab(1)
+end)
 showTab(1)
+
+-- Fishing Tab
+local fishingTab = tabs[1]
+
+local attractBtn = Instance.new("TextButton")
+attractBtn.Text = "Instant Attract Fish"
+attractBtn.Font = Enum.Font.GothamBold
+attractBtn.TextSize = 16
+attractBtn.Size = UDim2.new(0, 240, 0, 40)
+attractBtn.Position = UDim2.new(0, 25, 0, 35)
+attractBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 90)
+attractBtn.TextColor3 = Color3.new(1,1,1)
+attractBtn.Parent = fishingTab
+attractBtn.MouseButton1Click:Connect(instantCollect)
+
+attractStatus = Instance.new("TextLabel")
+attractStatus.Size = UDim2.new(0, 50, 0, 40)
+attractStatus.Position = UDim2.new(0, 275, 0, 35)
+attractStatus.Text = "OFF"
+attractStatus.Font = Enum.Font.GothamBold
+attractStatus.TextSize = 16
+attractStatus.BackgroundTransparency = 1
+attractStatus.TextColor3 = Color3.fromRGB(220,60,60)
+attractStatus.Parent = fishingTab
+
+local reelBtn = Instance.new("TextButton")
+reelBtn.Text = "Instant Reel"
+reelBtn.Font = Enum.Font.GothamBold
+reelBtn.TextSize = 16
+reelBtn.Size = UDim2.new(0, 240, 0, 40)
+reelBtn.Position = UDim2.new(0, 25, 0, 85)
+reelBtn.BackgroundColor3 = Color3.fromRGB(60, 130, 250)
+reelBtn.TextColor3 = Color3.new(1,1,1)
+reelBtn.Parent = fishingTab
+reelBtn.MouseButton1Click:Connect(instantReel)
+
+reelStatus = Instance.new("TextLabel")
+reelStatus.Size = UDim2.new(0, 50, 0, 40)
+reelStatus.Position = UDim2.new(0, 275, 0, 85)
+reelStatus.Text = "OFF"
+reelStatus.Font = Enum.Font.GothamBold
+reelStatus.TextSize = 16
+reelStatus.BackgroundTransparency = 1
+reelStatus.TextColor3 = Color3.fromRGB(220,60,60)
+reelStatus.Parent = fishingTab
+
+local info = Instance.new("TextLabel")
+info.Text = "Press the buttons above to instantly attract fish or reel in.\n(C and R hotkeys still work)"
+info.Font = Enum.Font.Gotham
+info.TextSize = 14
+info.Size = UDim2.new(1, -20, 0, 40)
+info.Position = UDim2.new(0, 10, 0, 135)
+info.TextColor3 = Color3.new(1,1,1)
+info.BackgroundTransparency = 1
+info.Parent = fishingTab
+
+updateStatus()
+
+-- Sell Teleport Tab
+local function populateTeleportTab(tab, src, color)
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Size = UDim2.new(1, -20, 1, -20)
+    scroll.Position = UDim2.new(0, 10, 0, 10)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    scroll.BackgroundTransparency = 1
+    scroll.ScrollBarThickness = 8
+    scroll.Parent = tab
+
+    local layout = Instance.new("UIListLayout")
+    layout.SortOrder = Enum.SortOrder.LayoutOrder
+    layout.Padding = UDim.new(0, 6)
+    layout.Parent = scroll
+
+    if src then
+        for _, obj in pairs(src:GetChildren()) do
+            if obj:IsA("BasePart") or obj:IsA("Model") then
+                local btn = Instance.new("TextButton")
+                btn.Size = UDim2.new(1, -10, 0, 35)
+                btn.Text = "Teleport to "..obj.Name
+                btn.BackgroundColor3 = color
+                btn.TextColor3 = Color3.new(1,1,1)
+                btn.Font = Enum.Font.Gotham
+                btn.TextSize = 16
+                btn.Parent = scroll
+                btn.MouseButton1Click:Connect(function()
+                    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+                    if obj:IsA("BasePart") then
+                        char:MoveTo(obj.Position)
+                    elseif obj:IsA("Model") and obj.PrimaryPart then
+                        char:MoveTo(obj.PrimaryPart.Position)
+                    else
+                        local part = obj:FindFirstChildWhichIsA("BasePart")
+                        if part then
+                            char:MoveTo(part.Position)
+                        end
+                    end
+                end)
+            end
+        end
+        wait() -- Allow UIListLayout to update
+        scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
+    else
+        local txt = Instance.new("TextLabel")
+        txt.Text = "Nothing found!"
+        txt.Size = UDim2.new(1, -10, 0, 40)
+        txt.Font = Enum.Font.Gotham
+        txt.TextColor3 = Color3.fromRGB(200,50,50)
+        txt.BackgroundTransparency = 1
+        txt.Parent = scroll
+        scroll.CanvasSize = UDim2.new(0, 0, 0, 50)
+    end
+end
+
+populateTeleportTab(tabs[2], workspace:FindFirstChild("GameStalls"), Color3.fromRGB(120,90,90))
+populateTeleportTab(tabs[3], workspace:FindFirstChild("Zones"), Color3.fromRGB(90,120,90)) -- Zones tab is scrollable now!
+populateTeleportTab(tabs[4], ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("BossEvent"), Color3.fromRGB(90,90,120))
 
 -- Optional: keep old hotkey support
 game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
