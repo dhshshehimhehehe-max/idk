@@ -1,0 +1,76 @@
+-- Place in StarterPlayerScripts
+
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+local BridgeNet2 = require(ReplicatedStorage.Packages.BridgeNet2)
+local Net_ForcePull = BridgeNet2.ReferenceBridge("Net_ForcePull")
+local Net_ReelDelta = BridgeNet2.ReferenceBridge("Net_ReelDelta")
+
+-- Settings: adjust as needed
+local MAX_REEL_PER_SECOND = 20   -- Don't exceed anti-cheat
+local TOTAL_REEL_PRESSES = 12    -- As per config
+local INSTANT_COLLECT_FISH = 4   -- Max fish to collect
+
+-- Helper: get current netting controller and state
+local function getNettingController()
+    for _, v in pairs(getgc(true)) do
+        if type(v) == "table" and rawget(v, "UI") and rawget(v, "_tool") then
+            return v
+        end
+    end
+    return nil
+end
+
+local function getState(controller)
+    if controller and controller.UI then
+        local StateValue = controller.UI:FindFirstChild("State")
+        if StateValue then
+            return StateValue.Value
+        end
+    end
+    -- Fallback: guess from controller variables
+    if controller and controller._nettingSession then
+        return controller._nettingSession.State
+    end
+    return nil
+end
+
+-- Instant attract all fish
+local function instantCollect()
+    local controller = getNettingController()
+    local state = getState(controller)
+    if state == "Collecting" then
+        for i = 1, INSTANT_COLLECT_FISH do
+            Net_ForcePull:Fire()
+            wait(0.05) -- Small delay to avoid spamming
+        end
+    end
+end
+
+-- Instant reel in all presses
+local function instantReel()
+    local controller = getNettingController()
+    local state = getState(controller)
+    if state == "Reeling" then
+        for i = 1, TOTAL_REEL_PRESSES do
+            Net_ReelDelta:Fire(1) -- 1 means one reel press
+            wait(1 / MAX_REEL_PER_SECOND)
+        end
+    end
+end
+
+-- You can bind these to keys for testing
+game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
+    if processed then return end
+    if input.KeyCode == Enum.KeyCode.C then -- C for Collect
+        instantCollect()
+    elseif input.KeyCode == Enum.KeyCode.R then -- R for Reel
+        instantReel()
+    end
+end)
+
+-- Or call them automatically if you want (not recommended; anti-cheat risk)
+-- instantCollect()
+-- instantReel()
