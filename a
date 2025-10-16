@@ -1,87 +1,21 @@
--- Fishing & Teleport GUI v2 by dhshshehimhehehe-max
-
+-- Fishing & Teleport GUI v3, with working instant attract/reel for custom RemoteEvent
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
-local BridgeNet2 = require(ReplicatedStorage.Packages.BridgeNet2)
-local Net_ForcePull = BridgeNet2.ReferenceBridge("Net_ForcePull")
-local Net_ReelDelta = BridgeNet2.ReferenceBridge("Net_ReelDelta")
+-- Remote setup
+local remote = ReplicatedStorage:WaitForChild("ffrostflame_bridgenet2@1.0.0"):WaitForChild("dataRemoteEvent")
+local USER_ID = LocalPlayer.UserId
 
-local MAX_REEL_PER_SECOND = 20
-local TOTAL_REEL_PRESSES = 12
-local INSTANT_COLLECT_FISH = 4
+-- CONFIG: Set these per your net, you can make this dynamic if you want
+local FISH_PER_NET = 4           -- Max fish your net can hold (edit for your net)
+local TOTAL_REEL_PRESSES = 12    -- How many times you'd normally have to click to reel
 
--- Feature status
+-- Status
 local attractActive = false
 local reelActive = false
 
-local function getNettingController()
-    if getgc then
-        for _, v in pairs(getgc(true)) do
-            if type(v) == "table" and rawget(v, "UI") and rawget(v, "_tool") then
-                return v
-            end
-        end
-    end
-    return nil
-end
-
-local function getState(controller)
-    if controller and controller.UI then
-        local StateValue = controller.UI:FindFirstChild("State")
-        if StateValue then
-            return StateValue.Value
-        end
-    end
-    if controller and controller._nettingSession then
-        return controller._nettingSession.State
-    end
-    return nil
-end
-
-local function updateStatus()
-    if attractStatus then
-        attractStatus.Text = attractActive and "ON" or "OFF"
-        attractStatus.TextColor3 = attractActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
-    end
-    if reelStatus then
-        reelStatus.Text = reelActive and "ON" or "OFF"
-        reelStatus.TextColor3 = reelActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
-    end
-end
-
-local function instantCollect()
-    attractActive = true
-    updateStatus()
-    local controller = getNettingController()
-    local state = getState(controller)
-    if state == "Collecting" then
-        for i = 1, INSTANT_COLLECT_FISH do
-            Net_ForcePull:Fire()
-            wait(0.05)
-        end
-    end
-    attractActive = false
-    updateStatus()
-end
-
-local function instantReel()
-    reelActive = true
-    updateStatus()
-    local controller = getNettingController()
-    local state = getState(controller)
-    if state == "Reeling" then
-        for i = 1, TOTAL_REEL_PRESSES do
-            Net_ReelDelta:Fire(1)
-            wait(1 / MAX_REEL_PER_SECOND)
-        end
-    end
-    reelActive = false
-    updateStatus()
-end
-
--- GUI Setup
+-- GUI Setup (as before, tabs + scrollable + minimize/maximize)
 local screenGui = Instance.new("ScreenGui")
 screenGui.Name = "FishingGUI"
 screenGui.ResetOnSpawn = false
@@ -165,7 +99,6 @@ for i, tabName in ipairs(tabNames) do
     tabs[i] = tab
 end
 
--- Fix: Tabs always visible after maximize
 local function showTab(idx)
     if minimized then return end
     for i, tab in ipairs(tabs) do
@@ -193,7 +126,20 @@ maxBtn.MouseButton1Click:Connect(function()
 end)
 showTab(1)
 
--- Fishing Tab
+-- Status function (updates ON/OFF color)
+local attractStatus, reelStatus
+local function updateStatus()
+    if attractStatus then
+        attractStatus.Text = attractActive and "ON" or "OFF"
+        attractStatus.TextColor3 = attractActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
+    end
+    if reelStatus then
+        reelStatus.Text = reelActive and "ON" or "OFF"
+        reelStatus.TextColor3 = reelActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
+    end
+end
+
+-- FISHING TAB
 local fishingTab = tabs[1]
 
 local attractBtn = Instance.new("TextButton")
@@ -205,7 +151,6 @@ attractBtn.Position = UDim2.new(0, 25, 0, 35)
 attractBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 90)
 attractBtn.TextColor3 = Color3.new(1,1,1)
 attractBtn.Parent = fishingTab
-attractBtn.MouseButton1Click:Connect(instantCollect)
 
 attractStatus = Instance.new("TextLabel")
 attractStatus.Size = UDim2.new(0, 50, 0, 40)
@@ -226,7 +171,6 @@ reelBtn.Position = UDim2.new(0, 25, 0, 85)
 reelBtn.BackgroundColor3 = Color3.fromRGB(60, 130, 250)
 reelBtn.TextColor3 = Color3.new(1,1,1)
 reelBtn.Parent = fishingTab
-reelBtn.MouseButton1Click:Connect(instantReel)
 
 reelStatus = Instance.new("TextLabel")
 reelStatus.Size = UDim2.new(0, 50, 0, 40)
@@ -250,7 +194,7 @@ info.Parent = fishingTab
 
 updateStatus()
 
--- Sell Teleport Tab
+-- Sell/Zone/Boss Tabs (scrollable)
 local function populateTeleportTab(tab, src, color)
     local scroll = Instance.new("ScrollingFrame")
     scroll.Size = UDim2.new(1, -20, 1, -20)
@@ -304,17 +248,75 @@ local function populateTeleportTab(tab, src, color)
         scroll.CanvasSize = UDim2.new(0, 0, 0, 50)
     end
 end
-
 populateTeleportTab(tabs[2], workspace:FindFirstChild("GameStalls"), Color3.fromRGB(120,90,90))
-populateTeleportTab(tabs[3], workspace:FindFirstChild("Zones"), Color3.fromRGB(90,120,90)) -- Zones tab is scrollable now!
+populateTeleportTab(tabs[3], workspace:FindFirstChild("Zones"), Color3.fromRGB(90,120,90))
 populateTeleportTab(tabs[4], ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("BossEvent"), Color3.fromRGB(90,90,120))
 
--- Optional: keep old hotkey support
+-- FISH LOGIC (NEW!)
+local rng = Random.new()
+local FISH_TYPES = {"Carp", "Trout", "Salmon", "Bass", "Pike"} -- edit or expand as needed
+
+local function randomFish()
+    return FISH_TYPES[rng:NextInteger(1, #FISH_TYPES)]
+end
+
+local function randomVec()
+    return Vector3.new(
+        rng:NextNumber(200, 400),
+        rng:NextNumber(20, 40),
+        rng:NextNumber(-300, -150)
+    )
+end
+
+local function doInstantAttract()
+    attractActive = true
+    updateStatus()
+    -- Simulate all fish being caught instantly
+    for i = 1, FISH_PER_NET do
+        local args = {
+            {
+                {
+                    "FishCaptureEffect",
+                    {
+                        randomFish(),
+                        rng:NextNumber(1,3),          -- random float
+                        randomVec(),
+                        USER_ID
+                    }
+                },
+                "!"
+            }
+        }
+        remote:FireServer(unpack(args))
+        wait(0.2) -- Small delay to avoid anti-cheat, adjust as needed
+    end
+    attractActive = false
+    updateStatus()
+end
+
+local function doInstantReel()
+    reelActive = true
+    updateStatus()
+    -- Instantly do all reel clicks
+    for i = 1, TOTAL_REEL_PRESSES do
+        local args = {
+            {1, tostring(i)}
+        }
+        remote:FireServer(unpack(args))
+        wait(0.05) -- safe delay (20/s), adjust if needed
+    end
+    reelActive = false
+    updateStatus()
+end
+
+attractBtn.MouseButton1Click:Connect(doInstantAttract)
+reelBtn.MouseButton1Click:Connect(doInstantReel)
+
 game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
     if processed then return end
     if input.KeyCode == Enum.KeyCode.C then
-        instantCollect()
+        doInstantAttract()
     elseif input.KeyCode == Enum.KeyCode.R then
-        instantReel()
+        doInstantReel()
     end
 end)
