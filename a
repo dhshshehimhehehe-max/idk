@@ -1,10 +1,11 @@
 -- TeleportSpecificOres.lua
--- LocalScript: same UI layout but only tracks a fixed list of rare ores (from your images).
+-- LocalScript: same UI layout but now with an Auto Teleport / Auto-Mine tab
 -- Behavior:
 --  - Builds a draggable, minimizable, scrollable UI with search/counts.
 --  - Performs an immediate single pass to detect any of the target ores present now.
 --  - Then relies on ChildAdded/ChildRemoved + AncestryChanged for instantaneous updates.
 --  - A very infrequent fallback scan runs to catch rare edge-cases.
+--  - New "Auto" tab: select an ore to auto-teleport to when it spawns; optional auto-mine tries to equip & activate a tool repeatedly.
 -- Place this under StarterGui (LocalScript) so it runs for the LocalPlayer.
 
 local Players = game:GetService("Players")
@@ -26,13 +27,13 @@ local masterOreList = {
     "Cerlustrium","Polarium","Cybernetium","Eclipsicle","Elementium","Runealith","Gradience","Inkonium","Dyronsinite","Krampus' Seal",
     "Luminatite","Sentient Viscera","Erodimium","Exoretic","Lucidium","Pastelorium","Albinite","Visteorite","π","Void Reaver",
 
-    -- added from images 7-10 (your earlier request)
+    -- added from images 7-10
     "Aether","Cleopatrite","Vulkavium","Scarfyte","Azuryl","Xynarium","Speatrium","Quandrium","Glacielle","Trinitium",
     "Formidulus","Elegascene","Emberstyx","Euclideum","Ophanim","Hallowed Prism","Altovite","Suncindium","Pasivium","Spristium",
     "Acceleratium","Vitrilyx","Ornalium","Penumbrosia","Obscuralis","Oviridis","Antipathy","Bonfire","Nauticalis","Aquoralivis",
     "Accretium","Astatine","Snoblinitium","Neptunium","Monocage","Combustal","Temporum","Polonium","Blazuine",
 
-    -- finally added from images 11-14 (your latest request)
+    -- added from images 11-14
     "Teslarium","Elexinite","Photoprisma","Thundarian","Exolite","Aegistone",
     "Vanadinite","Erythrite","Eluxant","Antiquite","Superunobtainium","Cryotic","Solarite","Zefendium","Alternium","Viverra",
     "Purpurite","Eluryan","Rainbonite","Elysian","Elusium","Promethium","Rusticog","Heliostra","Prismatica","Jet",
@@ -51,7 +52,7 @@ local partConnections = {} -- part -> connection
 
 -- UI state
 local oreButtons = {} -- name -> { Button, Count }
-local oreCategory = {} -- name -> category (optionally used)
+local oreCategory = {} -- name -> category
 local categoriesCreated = {}
 
 -- categorize helper (keeps same categories as before for layout)
@@ -72,7 +73,7 @@ local function categorizeOre(name)
     return "Other"
 end
 
--- UI creation (layout similar to prior script)
+-- UI creation (layout similar to prior script with Tabs)
 local gui = Instance.new("ScreenGui")
 gui.Name = "SpecificOreTeleportUI"
 gui.ResetOnSpawn = false
@@ -80,7 +81,7 @@ gui.Parent = playerGui
 
 local mainFrame = Instance.new("Frame")
 mainFrame.Name = "Main"
-mainFrame.Size = UDim2.new(0, 360, 0, 420)
+mainFrame.Size = UDim2.new(0, 360, 0, 460)
 mainFrame.Position = UDim2.new(0, 50, 0, 80)
 mainFrame.BackgroundColor3 = Color3.fromRGB(30,30,35)
 mainFrame.BorderSizePixel = 0
@@ -89,15 +90,15 @@ mainFrame.Active = true
 
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
-titleBar.Size = UDim2.new(1,0,0,34)
+titleBar.Size = UDim2.new(1, 0, 0, 34)
 titleBar.BackgroundColor3 = Color3.fromRGB(20,20,25)
 titleBar.BorderSizePixel = 0
 titleBar.Parent = mainFrame
 
 local titleLabel = Instance.new("TextLabel")
 titleLabel.Name = "Title"
-titleLabel.Size = UDim2.new(1,-190,1,0)
-titleLabel.Position = UDim2.new(0,10,0,0)
+titleLabel.Size = UDim2.new(1, -230, 1, 0)
+titleLabel.Position = UDim2.new(0, 10, 0, 0)
 titleLabel.BackgroundTransparency = 1
 titleLabel.Text = "Specific Ores"
 titleLabel.TextColor3 = Color3.fromRGB(220,220,220)
@@ -108,8 +109,8 @@ titleLabel.Parent = titleBar
 
 local minimizeBtn = Instance.new("TextButton")
 minimizeBtn.Name = "Minimize"
-minimizeBtn.Size = UDim2.new(0,30,0,24)
-minimizeBtn.Position = UDim2.new(1,-36,0,5)
+minimizeBtn.Size = UDim2.new(0, 30, 0, 24)
+minimizeBtn.Position = UDim2.new(1, -36, 0, 5)
 minimizeBtn.BackgroundColor3 = Color3.fromRGB(40,40,45)
 minimizeBtn.Text = "-"
 minimizeBtn.Font = Enum.Font.GothamBold
@@ -117,11 +118,11 @@ minimizeBtn.TextColor3 = Color3.fromRGB(200,200,200)
 minimizeBtn.TextScaled = true
 minimizeBtn.Parent = titleBar
 
--- search box in corner
+-- Search box & Clear (stays in title)
 local searchBox = Instance.new("TextBox")
 searchBox.Name = "SearchBox"
-searchBox.Size = UDim2.new(0,140,0,22)
-searchBox.Position = UDim2.new(1,-250,0,6)
+searchBox.Size = UDim2.new(0, 140, 0, 22)
+searchBox.Position = UDim2.new(1, -250, 0, 6)
 searchBox.PlaceholderText = "Search ores..."
 searchBox.BackgroundColor3 = Color3.fromRGB(50,50,55)
 searchBox.Text = ""
@@ -133,8 +134,8 @@ searchBox.ClearTextOnFocus = false
 
 local clearSearchBtn = Instance.new("TextButton")
 clearSearchBtn.Name = "ClearSearch"
-clearSearchBtn.Size = UDim2.new(0,22,0,22)
-clearSearchBtn.Position = UDim2.new(1,-106,0,6)
+clearSearchBtn.Size = UDim2.new(0, 22, 0, 22)
+clearSearchBtn.Position = UDim2.new(1, -106, 0, 6)
 clearSearchBtn.BackgroundColor3 = Color3.fromRGB(60,60,65)
 clearSearchBtn.Text = "X"
 clearSearchBtn.Font = Enum.Font.GothamBold
@@ -144,8 +145,8 @@ clearSearchBtn.Parent = titleBar
 
 local toggleCountsBtn = Instance.new("TextButton")
 toggleCountsBtn.Name = "ToggleCounts"
-toggleCountsBtn.Size = UDim2.new(0,80,0,22)
-toggleCountsBtn.Position = UDim2.new(1,-130,0,6)
+toggleCountsBtn.Size = UDim2.new(0, 80, 0, 22)
+toggleCountsBtn.Position = UDim2.new(1, -130, 0, 6)
 toggleCountsBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
 toggleCountsBtn.Text = "Counts: On"
 toggleCountsBtn.Font = Enum.Font.Gotham
@@ -153,18 +154,51 @@ toggleCountsBtn.TextSize = 14
 toggleCountsBtn.TextColor3 = Color3.fromRGB(220,220,220)
 toggleCountsBtn.Parent = titleBar
 
+-- Tab bar (below title)
+local tabBar = Instance.new("Frame")
+tabBar.Name = "TabBar"
+tabBar.Size = UDim2.new(1, 0, 0, 34)
+tabBar.Position = UDim2.new(0, 0, 0, 34)
+tabBar.BackgroundTransparency = 1
+tabBar.Parent = mainFrame
+
+local oresTabBtn = Instance.new("TextButton")
+oresTabBtn.Name = "OresTab"
+oresTabBtn.Size = UDim2.new(0, 0, 1, 0)
+oresTabBtn.Size = UDim2.new(0.5, -6, 1, -6)
+oresTabBtn.Position = UDim2.new(0, 6, 0, 3)
+oresTabBtn.Text = "Ores"
+oresTabBtn.Font = Enum.Font.Gotham
+oresTabBtn.TextSize = 14
+oresTabBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
+oresTabBtn.TextColor3 = Color3.fromRGB(220,220,220)
+oresTabBtn.Parent = tabBar
+
+local autoTabBtn = Instance.new("TextButton")
+autoTabBtn.Name = "AutoTab"
+autoTabBtn.Size = UDim2.new(0.5, -6, 1, -6)
+autoTabBtn.Position = UDim2.new(0.5, 0, 0, 3)
+autoTabBtn.Text = "Auto TP/Mine"
+autoTabBtn.Font = Enum.Font.Gotham
+autoTabBtn.TextSize = 14
+autoTabBtn.BackgroundColor3 = Color3.fromRGB(40,40,45)
+autoTabBtn.TextColor3 = Color3.fromRGB(200,200,200)
+autoTabBtn.Parent = tabBar
+
+-- Content frames for tabs
 local contentFrame = Instance.new("Frame")
 contentFrame.Name = "Content"
-contentFrame.Size = UDim2.new(1,0,1,-34)
-contentFrame.Position = UDim2.new(0,0,0,34)
+contentFrame.Size = UDim2.new(1, 0, 1, -68) -- account for title + tabBar
+contentFrame.Position = UDim2.new(0, 0, 0, 68)
 contentFrame.BackgroundTransparency = 1
 contentFrame.Parent = mainFrame
 
+-- Ores tab: scroll (existing behavior)
 local scroll = Instance.new("ScrollingFrame")
 scroll.Name = "Scroll"
-scroll.Size = UDim2.new(1,-12,1,-12)
-scroll.Position = UDim2.new(0,6,0,6)
-scroll.CanvasSize = UDim2.new(0,0,0,0)
+scroll.Size = UDim2.new(1, -12, 1, -12)
+scroll.Position = UDim2.new(0, 6, 0, 6)
+scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
 scroll.BackgroundTransparency = 1
 scroll.ScrollBarThickness = 6
 scroll.Active = true
@@ -173,11 +207,159 @@ scroll.Parent = contentFrame
 
 local layout = Instance.new("UIListLayout")
 layout.SortOrder = Enum.SortOrder.LayoutOrder
-layout.Padding = UDim.new(0,6)
+layout.Padding = UDim.new(0, 6)
 layout.Parent = scroll
 
 layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-    scroll.CanvasSize = UDim2.new(0,0,0,layout.AbsoluteContentSize.Y + 8)
+    scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+end)
+
+-- Auto tab: panel (initially hidden)
+local autoPanel = Instance.new("Frame")
+autoPanel.Name = "AutoPanel"
+autoPanel.Size = UDim2.new(1, -12, 1, -12)
+autoPanel.Position = UDim2.new(0, 6, 0, 6)
+autoPanel.BackgroundTransparency = 1
+autoPanel.Visible = false
+autoPanel.Parent = contentFrame
+
+local autoLayout = Instance.new("UIListLayout")
+autoLayout.SortOrder = Enum.SortOrder.LayoutOrder
+autoLayout.Padding = UDim.new(0, 6)
+autoLayout.Parent = autoPanel
+
+-- Auto UI elements
+local function makeLabel(text)
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, 22)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.Font = Enum.Font.Gotham
+    lbl.TextSize = 14
+    lbl.TextColor3 = Color3.fromRGB(220,220,220)
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.Parent = autoPanel
+    return lbl
+end
+
+makeLabel("Auto teleport & mine")
+-- Ore selection scrolling list inside autoPanel
+local oreSelectScroll = Instance.new("ScrollingFrame")
+oreSelectScroll.Size = UDim2.new(1, 0, 0, 160)
+oreSelectScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+oreSelectScroll.BackgroundColor3 = Color3.fromRGB(35,35,40)
+oreSelectScroll.ScrollBarThickness = 6
+oreSelectScroll.Parent = autoPanel
+
+local oreSelectLayout = Instance.new("UIListLayout")
+oreSelectLayout.Padding = UDim.new(0, 6)
+oreSelectLayout.Parent = oreSelectScroll
+
+oreSelectLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    oreSelectScroll.CanvasSize = UDim2.new(0, 0, 0, oreSelectLayout.AbsoluteContentSize.Y + 8)
+end)
+
+-- auto options frame
+local autoOptionsFrame = Instance.new("Frame")
+autoOptionsFrame.Size = UDim2.new(1, 0, 0, 120)
+autoOptionsFrame.BackgroundTransparency = 1
+autoOptionsFrame.Parent = autoPanel
+
+local autoInnerLayout = Instance.new("UIListLayout")
+autoInnerLayout.Parent = autoOptionsFrame
+autoInnerLayout.SortOrder = Enum.SortOrder.LayoutOrder
+autoInnerLayout.Padding = UDim.new(0, 6)
+
+-- toggles and inputs
+local autoTeleportToggle = Instance.new("TextButton")
+autoTeleportToggle.Size = UDim2.new(1, 0, 0, 28)
+autoTeleportToggle.Text = "Auto Teleport: Off"
+autoTeleportToggle.Font = Enum.Font.Gotham
+autoTeleportToggle.TextSize = 14
+autoTeleportToggle.BackgroundColor3 = Color3.fromRGB(45,45,50)
+autoTeleportToggle.TextColor3 = Color3.fromRGB(220,220,220)
+autoTeleportToggle.Parent = autoOptionsFrame
+
+local autoMineToggle = Instance.new("TextButton")
+autoMineToggle.Size = UDim2.new(1, 0, 0, 28)
+autoMineToggle.Text = "Auto Mine: Off"
+autoMineToggle.Font = Enum.Font.Gotham
+autoMineToggle.TextSize = 14
+autoMineToggle.BackgroundColor3 = Color3.fromRGB(45,45,50)
+autoMineToggle.TextColor3 = Color3.fromRGB(220,220,220)
+autoMineToggle.Parent = autoOptionsFrame
+
+local toolNameBox = Instance.new("TextBox")
+toolNameBox.Size = UDim2.new(1, 0, 0, 24)
+toolNameBox.PlaceholderText = "Tool name to equip (e.g. Pickaxe)"
+toolNameBox.Text = "Pickaxe"
+toolNameBox.Font = Enum.Font.Gotham
+toolNameBox.TextSize = 14
+toolNameBox.BackgroundColor3 = Color3.fromRGB(55,55,60)
+toolNameBox.TextColor3 = Color3.fromRGB(230,230,230)
+toolNameBox.Parent = autoOptionsFrame
+
+local mineIntervalBox = Instance.new("TextBox")
+mineIntervalBox.Size = UDim2.new(1, 0, 0, 24)
+mineIntervalBox.PlaceholderText = "Mine interval (seconds, e.g. 0.35)"
+mineIntervalBox.Text = "0.35"
+mineIntervalBox.Font = Enum.Font.Gotham
+mineIntervalBox.TextSize = 14
+mineIntervalBox.BackgroundColor3 = Color3.fromRGB(55,55,60)
+mineIntervalBox.TextColor3 = Color3.fromRGB(230,230,230)
+mineIntervalBox.Parent = autoOptionsFrame
+
+local jumpToFoundBtn = Instance.new("TextButton")
+jumpToFoundBtn.Size = UDim2.new(1, 0, 0, 28)
+jumpToFoundBtn.Text = "Teleport to first found now"
+jumpToFoundBtn.Font = Enum.Font.Gotham
+jumpToFoundBtn.TextSize = 14
+jumpToFoundBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
+jumpToFoundBtn.TextColor3 = Color3.fromRGB(220,220,220)
+jumpToFoundBtn.Parent = autoOptionsFrame
+
+-- helper: create ore select buttons (radio behavior)
+local selectedAutoOre = masterOreList[1]
+
+local function createOreSelectButton(oreName)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -8, 0, 24)
+    btn.BackgroundColor3 = Color3.fromRGB(60,60,65)
+    btn.TextColor3 = Color3.fromRGB(230,230,230)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.Text = oreName
+    btn.AutoButtonColor = true
+    btn.Parent = oreSelectScroll
+
+    btn.MouseButton1Click:Connect(function()
+        selectedAutoOre = oreName
+        -- visual highlight
+        for _, child in ipairs(oreSelectScroll:GetChildren()) do
+            if child:IsA("TextButton") then
+                child.BackgroundColor3 = Color3.fromRGB(60,60,65)
+            end
+        end
+        btn.BackgroundColor3 = Color3.fromRGB(90,90,95)
+    end)
+    -- set initial selection highlight
+    if oreName == selectedAutoOre then
+        btn.BackgroundColor3 = Color3.fromRGB(90,90,95)
+    end
+end
+
+-- populate ore selection list in batches (to avoid freeze)
+task.spawn(function()
+    local batch = 20
+    local i = 1
+    while i <= #masterOreList do
+        local last = math.min(#masterOreList, i + batch - 1)
+        for j = i, last do
+            createOreSelectButton(masterOreList[j])
+        end
+        i = last + 1
+        task.wait()
+    end
 end)
 
 -- highlight adornment
@@ -226,24 +408,26 @@ local function teleportToOre(oreName)
         if humanoid and humanoid.Sit then humanoid.Sit = false end
         hrp.CFrame = nearest.CFrame + Vector3.new(0,6.5,0)
         createHighlight(nearest)
+        return true
     else
         clearHighlight()
+        return false
     end
 end
 
--- create category and grid frames
+-- create category and grid frames (used by ore button creation)
 local function ensureCategoryExists(catName)
     if scroll:FindFirstChild("Grid_" .. catName) then return end
     categoriesCreated[catName] = true
 
     local catFrame = Instance.new("Frame")
     catFrame.Name = "Category_" .. catName
-    catFrame.Size = UDim2.new(1,-6,0,28)
+    catFrame.Size = UDim2.new(1, -6, 0, 28)
     catFrame.BackgroundTransparency = 1
     catFrame.Parent = scroll
 
     local catLabel = Instance.new("TextLabel")
-    catLabel.Size = UDim2.new(1,0,1,0)
+    catLabel.Size = UDim2.new(1, 0, 1, 0)
     catLabel.BackgroundTransparency = 1
     catLabel.Text = catName
     catLabel.TextColor3 = Color3.fromRGB(200,200,200)
@@ -253,23 +437,23 @@ local function ensureCategoryExists(catName)
 
     local grid = Instance.new("Frame")
     grid.Name = "Grid_" .. catName
-    grid.Size = UDim2.new(1,0,0,0)
+    grid.Size = UDim2.new(1, 0, 0, 0)
     grid.BackgroundTransparency = 1
     grid.Parent = scroll
 
     local gridLayout = Instance.new("UIGridLayout")
-    gridLayout.CellSize = UDim2.new(0,110,0,36)
-    gridLayout.CellPadding = UDim2.new(0,6,0,6)
+    gridLayout.CellSize = UDim2.new(0, 110, 0, 36)
+    gridLayout.CellPadding = UDim2.new(0, 6, 0, 6)
     gridLayout.FillDirection = Enum.FillDirection.Horizontal
     gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
     gridLayout.Parent = grid
 
     gridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        grid.Size = UDim2.new(1,0,0,gridLayout.AbsoluteContentSize.Y)
+        grid.Size = UDim2.new(1, 0, 0, gridLayout.AbsoluteContentSize.Y)
     end)
 end
 
--- create button for a target ore (lazy)
+-- create a single ore button inside the Ores scroll
 local function createButtonForOre(oreName)
     if oreButtons[oreName] then return end
     local cat = categorizeOre(oreName)
@@ -280,8 +464,8 @@ local function createButtonForOre(oreName)
 
     local btn = Instance.new("TextButton")
     btn.Name = "OreBtn_" .. oreName
-    btn.Size = UDim2.new(0,110,0,36)
-    btn.BackgroundColor3 = Color3.fromRGB(42,42,48)
+    btn.Size = UDim2.new(0, 110, 0, 36)
+    btn.BackgroundColor3 = Color3.fromRGB(42, 42, 48)
     btn.BorderSizePixel = 0
     btn.Text = oreName
     btn.Font = Enum.Font.Gotham
@@ -292,8 +476,8 @@ local function createButtonForOre(oreName)
 
     local countLabel = Instance.new("TextLabel")
     countLabel.Name = "Count"
-    countLabel.Size = UDim2.new(0,34,1,0)
-    countLabel.Position = UDim2.new(1,-36,0,0)
+    countLabel.Size = UDim2.new(0, 34, 1, 0)
+    countLabel.Position = UDim2.new(1, -36, 0, 0)
     countLabel.BackgroundTransparency = 1
     countLabel.Text = "0"
     countLabel.Font = Enum.Font.Gotham
@@ -305,7 +489,10 @@ local function createButtonForOre(oreName)
         teleportToOre(oreName)
     end)
 
-    oreButtons[oreName] = { Button = btn, Count = countLabel }
+    oreButtons[oreName] = {
+        Button = btn,
+        Count = countLabel,
+    }
 end
 
 -- update a button count, create button lazily if needed
@@ -369,7 +556,6 @@ local function removePartRecord(part)
 end
 
 -- Initial "instant" check: single pass of mineFolder children, only looking for desired names.
--- This is fast because we check membership on each child and only record matches.
 local function instantInitialScan()
     local children = mineFolder:GetChildren()
     for _, child in ipairs(children) do
@@ -392,7 +578,6 @@ mineFolder.ChildAdded:Connect(function(child)
 end)
 mineFolder.ChildRemoved:Connect(function(child)
     if child and child:IsA("BasePart") and desiredSet[child.Name] then
-        -- removal may already be handled via AncestryChanged, but handle just in case
         removePartRecord(child)
     end
 end)
@@ -511,65 +696,270 @@ toggleCountsBtn.MouseButton1Click:Connect(function()
     end
 end)
 
--- dragging main frame
-local dragging = false
-local dragInput, dragStart, startPos
-local function updatePosition(input)
-    local delta = input.Position - dragStart
-    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+-- Tab switching
+oresTabBtn.MouseButton1Click:Connect(function()
+    scroll.Visible = true
+    autoPanel.Visible = false
+    oresTabBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
+    autoTabBtn.BackgroundColor3 = Color3.fromRGB(40,40,45)
+end)
+autoTabBtn.MouseButton1Click:Connect(function()
+    scroll.Visible = false
+    autoPanel.Visible = true
+    oresTabBtn.BackgroundColor3 = Color3.fromRGB(40,40,45)
+    autoTabBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
+end)
+
+-- Auto logic
+local autoTeleportEnabled = false
+local autoMineEnabled = false
+local mineCoroutine = nil
+local autoCoroutine = nil
+
+autoTeleportToggle.MouseButton1Click:Connect(function()
+    autoTeleportEnabled = not autoTeleportEnabled
+    autoTeleportToggle.Text = "Auto Teleport: " .. (autoTeleportEnabled and "On" or "Off")
+    autoTeleportToggle.BackgroundColor3 = autoTeleportEnabled and Color3.fromRGB(70,50,50) or Color3.fromRGB(45,45,50)
+    -- start worker when toggled on
+    if autoTeleportEnabled and not autoCoroutine then
+        autoCoroutine = coroutine.create(function()
+            while autoTeleportEnabled or autoMineEnabled do
+                local entry = partsByName[selectedAutoOre]
+                if entry and entry.count and entry.count > 0 then
+                    teleportToOre(selectedAutoOre)
+                    -- if auto-mine enabled, kick off mine coroutine
+                    if autoMineEnabled and not mineCoroutine then
+                        -- start mining coroutine
+                        mineCoroutine = coroutine.create(function()
+                            -- try to equip tool
+                            local toolName = tostring(toolNameBox.Text or "Pickaxe")
+                            local interval = tonumber(mineIntervalBox.Text) or 0.35
+                            local function findAndEquip()
+                                local backpack = player:FindFirstChildOfClass("Backpack")
+                                local char = player.Character
+                                -- search Character then Backpack
+                                if char then
+                                    for _,obj in ipairs(char:GetChildren()) do
+                                        if obj:IsA("Tool") and obj.Name == toolName then
+                                            return obj
+                                        end
+                                    end
+                                end
+                                if backpack then
+                                    for _,obj in ipairs(backpack:GetChildren()) do
+                                        if obj:IsA("Tool") and obj.Name == toolName then
+                                            return obj
+                                        end
+                                    end
+                                end
+                                return nil
+                            end
+                            local tool = findAndEquip()
+                            if tool and tool.Parent ~= player.Character then
+                                -- equip by setting parent to character
+                                tool.Parent = player.Character
+                            end
+                            if not tool then
+                                -- try again later
+                                -- tool may not exist; we will keep trying while autoMineEnabled
+                            end
+                            -- mining loop: attempt Tool:Activate() if tool found
+                            while autoMineEnabled do
+                                local foundEntry = partsByName[selectedAutoOre]
+                                if not (foundEntry and foundEntry.count and foundEntry.count > 0) then
+                                    break -- no more ores of this type
+                                end
+                                -- ensure character exists and tool is equipped
+                                if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+                                    player.CharacterAdded:Wait()
+                                    repeat task.wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                                end
+                                tool = findAndEquip()
+                                if tool and tool.Parent ~= player.Character then
+                                    tool.Parent = player.Character
+                                end
+                                -- attempt to activate the tool (best-effort)
+                                if tool and tool.Parent == player.Character then
+                                    -- pcall in case Activate errors
+                                    pcall(function()
+                                        if tool.Activate then
+                                            tool:Activate()
+                                        end
+                                        -- some tools rely on RemoteEvents - not handled here
+                                    end)
+                                end
+                                -- Wait a little bit for mining to register / ore to get damaged/mined
+                                task.wait(interval)
+                            end
+                            mineCoroutine = nil
+                        end)
+                        coroutine.resume(mineCoroutine)
+                    end
+                end
+                task.wait(0.5) -- throttle check
+            end
+            autoCoroutine = nil
+        end)
+        coroutine.resume(autoCoroutine)
+    end
+end)
+
+autoMineToggle.MouseButton1Click:Connect(function()
+    autoMineEnabled = not autoMineEnabled
+    autoMineToggle.Text = "Auto Mine: " .. (autoMineEnabled and "On" or "Off")
+    autoMineToggle.BackgroundColor3 = autoMineEnabled and Color3.fromRGB(70,50,50) or Color3.fromRGB(45,45,50)
+    -- if enabling and autoTeleport is off, still start mining when ore found (it will not teleport)
+    if (autoMineEnabled or autoTeleportEnabled) and not autoCoroutine then
+        autoCoroutine = coroutine.create(function()
+            while autoTeleportEnabled or autoMineEnabled do
+                local entry = partsByName[selectedAutoOre]
+                if entry and entry.count and entry.count > 0 then
+                    if autoTeleportEnabled then
+                        teleportToOre(selectedAutoOre)
+                    end
+                    -- kick off mine coroutine if enabled
+                    if autoMineEnabled and not mineCoroutine then
+                        mineCoroutine = coroutine.create(function()
+                            local toolName = tostring(toolNameBox.Text or "Pickaxe")
+                            local interval = tonumber(mineIntervalBox.Text) or 0.35
+                            local function findAndEquip()
+                                local backpack = player:FindFirstChildOfClass("Backpack")
+                                local char = player.Character
+                                if char then
+                                    for _,obj in ipairs(char:GetChildren()) do
+                                        if obj:IsA("Tool") and obj.Name == toolName then
+                                            return obj
+                                        end
+                                    end
+                                end
+                                if backpack then
+                                    for _,obj in ipairs(backpack:GetChildren()) do
+                                        if obj:IsA("Tool") and obj.Name == toolName then
+                                            return obj
+                                        end
+                                    end
+                                end
+                                return nil
+                            end
+                            local tool = findAndEquip()
+                            if tool and tool.Parent ~= player.Character then
+                                tool.Parent = player.Character
+                            end
+                            while autoMineEnabled do
+                                local foundEntry = partsByName[selectedAutoOre]
+                                if not (foundEntry and foundEntry.count and foundEntry.count > 0) then
+                                    break
+                                end
+                                if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+                                    player.CharacterAdded:Wait()
+                                    repeat task.wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                                end
+                                tool = findAndEquip()
+                                if tool and tool.Parent ~= player.Character then
+                                    tool.Parent = player.Character
+                                end
+                                if tool and tool.Parent == player.Character then
+                                    pcall(function()
+                                        if tool.Activate then tool:Activate() end
+                                    end)
+                                end
+                                task.wait(tonumber(mineIntervalBox.Text) or 0.35)
+                            end
+                            mineCoroutine = nil
+                        end)
+                        coroutine.resume(mineCoroutine)
+                    end
+                end
+                task.wait(0.5)
+            end
+            autoCoroutine = nil
+        end)
+        coroutine.resume(autoCoroutine)
+    end
+end)
+
+-- jump to found now button
+jumpToFoundBtn.MouseButton1Click:Connect(function()
+    teleportToOre(selectedAutoOre)
+end)
+
+-- create ore select buttons inside the main ore list as well (they already exist there)
+-- (note: oreSelect list already created separately earlier)
+
+-- utility: immediate teleport when ore added if it matches selectedAutoOre and autoTeleport is enabled
+local function onOreAddedInstant(part)
+    if not part or not part.Name then return end
+    if part.Name == selectedAutoOre then
+        if autoTeleportEnabled then
+            -- teleport
+            teleportToOre(selectedAutoOre)
+        end
+        if autoMineEnabled then
+            -- start mine coroutine if not already running
+            if not mineCoroutine then
+                mineCoroutine = coroutine.create(function()
+                    local toolName = tostring(toolNameBox.Text or "Pickaxe")
+                    local interval = tonumber(mineIntervalBox.Text) or 0.35
+                    local function findAndEquip()
+                        local backpack = player:FindFirstChildOfClass("Backpack")
+                        local char = player.Character
+                        if char then
+                            for _,obj in ipairs(char:GetChildren()) do
+                                if obj:IsA("Tool") and obj.Name == toolName then
+                                    return obj
+                                end
+                            end
+                        end
+                        if backpack then
+                            for _,obj in ipairs(backpack:GetChildren()) do
+                                if obj:IsA("Tool") and obj.Name == toolName then
+                                    return obj
+                                end
+                            end
+                        end
+                        return nil
+                    end
+                    local tool = findAndEquip()
+                    if tool and tool.Parent ~= player.Character then
+                        tool.Parent = player.Character
+                    end
+                    while autoMineEnabled do
+                        local foundEntry = partsByName[selectedAutoOre]
+                        if not (foundEntry and foundEntry.count and foundEntry.count > 0) then
+                            break
+                        end
+                        if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+                            player.CharacterAdded:Wait()
+                            repeat task.wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+                        end
+                        tool = findAndEquip()
+                        if tool and tool.Parent ~= player.Character then
+                            tool.Parent = player.Character
+                        end
+                        if tool and tool.Parent == player.Character then
+                            pcall(function() if tool.Activate then tool:Activate() end end)
+                        end
+                        task.wait(tonumber(mineIntervalBox.Text) or 0.35)
+                    end
+                    mineCoroutine = nil
+                end)
+                coroutine.resume(mineCoroutine)
+            end
+        end
+    end
 end
 
-titleBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = mainFrame.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
+-- Hook instant add to the global ChildAdded listener to call onOreAddedInstant as well
+mineFolder.ChildAdded:Connect(function(child)
+    if child and child:IsA("BasePart") and desiredSet[child.Name] then
+        onOreAddedInstant(child)
     end
 end)
 
-titleBar.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and input == dragInput then
-        updatePosition(input)
-    end
-end)
-
--- minimize toggle
-local minimized = false
-local origSize = mainFrame.Size
-minimizeBtn.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    if minimized then
-        TweenService:Create(mainFrame, TweenInfo.new(0.18), {Size = UDim2.new(origSize.X.Scale, origSize.X.Offset, 0, 34)}):Play()
-        contentFrame.Visible = false
-    else
-        contentFrame.Visible = true
-        TweenService:Create(mainFrame, TweenInfo.new(0.18), {Size = origSize}):Play()
-    end
-end)
-
--- random hotkey teleport (kept for convenience)
-UserInputService.InputBegan:Connect(function(input, gp)
-    if gp then return end
-    if input.KeyCode == Enum.KeyCode.Nine then
-        local available = {}
-        for name,entry in pairs(partsByName) do
-            if entry and entry.count and entry.count > 0 then table.insert(available, name) end
-        end
-        if #available > 0 then
-            teleportToOre(available[math.random(1,#available)])
-        end
-    end
+-- Keep GUI alive on respawn
+player.CharacterAdded:Connect(function()
+    task.wait(0.2)
+    if not gui.Parent then gui.Parent = playerGui end
 end)
 
 -- cleanup on script destroy
@@ -579,3 +969,5 @@ script.Destroying:Connect(function()
         if conn and conn.Disconnect then conn:Disconnect() end
     end
 end)
+
+-- end of script
