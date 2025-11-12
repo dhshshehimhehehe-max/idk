@@ -20,14 +20,20 @@ local mineFolder = workspace:FindFirstChild("Mine") or workspace:WaitForChild("M
 
 -- === Target ore list (from the screenshots you provided) ===
 local masterOreList = {
-    -- image 1 / 4
+    -- image 1 / 4 (original)
     "Empress of Light","Idolium","Scribbal","Terratomere","Endozivite","Inclementite","Illusory Bubblegram","Nyctophyte","Dynamo of Fate","Machina","Chrysalis",
-    -- image 2
+    -- image 2 (original)
     "Gargantium","Musereign","Magnetyx","Ω","Ravenmare","Bulbalescense","Candilium","Elbrus' Pride","Vaporwave Crystal","Glitzar",
-    -- image 3
+    -- image 3 (original)
     "Cerlustrium","Polarium","Cybernetium","Eclipsicle","Elementium","Runealith","Gradience","Inkonium","Dyronsinite","Krampus' Seal",
-    -- image 4
-    "Luminatite","Sentient Viscera","Erodimium","Exoretic","Lucidium","Pastelorium","Albinite","Visteorite","π","Void Reaver"
+    -- image 4 (original)
+    "Luminatite","Sentient Viscera","Erodimium","Exoretic","Lucidium","Pastelorium","Albinite","Visteorite","π","Void Reaver",
+
+    -- image 7-10: added names from your latest screenshots
+    "Aether","Cleopatrite","Vulkavium","Scarfyte","Azuryl","Xynarium","Speatrium","Quandrium","Glacielle","Trinitium",
+    "Formidulus","Elegascene","Emberstyx","Euclideum","Ophanim","Hallowed Prism","Altovite","Suncindium","Pasivium","Spristium",
+    "Acceleratium","Vitrilyx","Ornalium","Penumbrosia","Obscuralis","Oviridis","Antipathy","Bonfire","Nauticalis","Aquoralivis",
+    "Accretium","Astatine","Snoblinitium","Neptunium","Monocage","Combustal","Temporum","Polonium","Blazuine"
 }
 
 -- Make a set for quick membership checks
