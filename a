@@ -1,319 +1,573 @@
--- Fishing & Teleport GUI v4 - WORKING INSTANT FISH AND REEL FOR THIS GAME
+-- TeleportSpecificOres.lua
+-- LocalScript: same UI layout but only tracks a fixed list of rare ores (from your images).
+-- Behavior:
+--  - Builds a draggable, minimizable, scrollable UI with search/counts.
+--  - Performs an immediate single pass to detect any of the target ores present now.
+--  - Then relies on ChildAdded/ChildRemoved + AncestryChanged for instantaneous updates.
+--  - A very infrequent fallback scan runs to catch rare edge-cases.
+-- Place this under StarterGui (LocalScript) so it runs for the LocalPlayer.
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local task = task
 
-local remote = ReplicatedStorage:WaitForChild("ffrostflame_bridgenet2@1.0.0"):WaitForChild("dataRemoteEvent")
-local USER_ID = LocalPlayer.UserId
+local player = Players.LocalPlayer or Players.PlayerAdded:Wait()
+local playerGui = player:WaitForChild("PlayerGui")
+local workspace = game:GetService("Workspace")
+local mineFolder = workspace:FindFirstChild("Mine") or workspace:WaitForChild("Mine")
 
--- CONFIG: Set these per your net, or make them dynamic if you want
-local FISH_PER_NET = 4           -- Max fish your net can hold
-local TOTAL_REEL_PRESSES = 12    -- How many times you'd normally have to click to reel
+-- === Target ore list (from the screenshots you provided) ===
+local masterOreList = {
+    -- image 1 / 4
+    "Empress of Light","Idolium","Scribbal","Terratomere","Endozivite","Inclementite","Illusory Bubblegram","Nyctophyte","Dynamo of Fate","Machina","Chrysalis",
+    -- image 2
+    "Gargantium","Musereign","Magnetyx","Ω","Ravenmare","Bulbalescense","Candilium","Elbrus' Pride","Vaporwave Crystal","Glitzar",
+    -- image 3
+    "Cerlustrium","Polarium","Cybernetium","Eclipsicle","Elementium","Runealith","Gradience","Inkonium","Dyronsinite","Krampus' Seal",
+    -- image 4
+    "Luminatite","Sentient Viscera","Erodimium","Exoretic","Lucidium","Pastelorium","Albinite","Visteorite","π","Void Reaver"
+}
 
--- The latest vector position for the water, from your log
-local FISH_VECTOR = Vector3.new(283.98358154296875, 27.99997329711914, -204.96829223632812)
+-- Make a set for quick membership checks
+local desiredSet = {}
+for _, name in ipairs(masterOreList) do
+    desiredSet[name] = true
+end
 
--- List of fish to use, from your log. Can randomize or just cycle.
-local FISH_TYPES = {"RainbowTrout", "Perch", "Carp"}
+-- bookkeeping for parts
+local partsByName = {} -- name -> { parts = {[part] = true}, count = n }
+local partConnections = {} -- part -> connection
 
--- Float values to use (randomized or cycled)
-local FLOATS = {1.18, 1.35, 1.13, 1.71}
+-- UI state
+local oreButtons = {} -- name -> { Button, Count }
+local oreCategory = {} -- name -> category (optionally used)
+local categoriesCreated = {}
 
--- Status
-local attractActive = false
-local reelActive = false
+-- categorize helper (keeps same categories as before for layout)
+local categoryKeywords = {
+    Stone = {"stone","rock","bedrock","mantle"},
+    Metal = {"iron","copper","gold","nickel","tin","aluminum","platinum","titanium"},
+    Gem = {"ruby","emerald","diamond","amethyst","jade","topaz","aquamarine","garnet"}
+}
+local function categorizeOre(name)
+    local lower = (name or ""):lower()
+    for cat, kw in pairs(categoryKeywords) do
+        for _, k in ipairs(kw) do
+            if lower:find(k, 1, true) then
+                return cat
+            end
+        end
+    end
+    return "Other"
+end
 
--- GUI Setup (as before, tabs + scrollable + minimize/maximize)
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "FishingGUI"
-screenGui.ResetOnSpawn = false
-screenGui.Parent = game:GetService("CoreGui")
+-- UI creation (layout similar to prior script)
+local gui = Instance.new("ScreenGui")
+gui.Name = "SpecificOreTeleportUI"
+gui.ResetOnSpawn = false
+gui.Parent = playerGui
 
-local window = Instance.new("Frame")
-window.Name = "MainFrame"
-window.Size = UDim2.new(0, 420, 0, 320)
-window.Position = UDim2.new(0.5, -210, 0.5, -160)
-window.BackgroundColor3 = Color3.fromRGB(42, 44, 51)
-window.BorderSizePixel = 0
-window.Parent = screenGui
-window.Active = true
-window.Draggable = true
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "Main"
+mainFrame.Size = UDim2.new(0, 360, 0, 420)
+mainFrame.Position = UDim2.new(0, 50, 0, 80)
+mainFrame.BackgroundColor3 = Color3.fromRGB(30,30,35)
+mainFrame.BorderSizePixel = 0
+mainFrame.Parent = gui
+mainFrame.Active = true
 
 local titleBar = Instance.new("Frame")
-titleBar.Size = UDim2.new(1, 0, 0, 38)
-titleBar.BackgroundColor3 = Color3.fromRGB(55, 57, 62)
-titleBar.Parent = window
+titleBar.Name = "TitleBar"
+titleBar.Size = UDim2.new(1,0,0,34)
+titleBar.BackgroundColor3 = Color3.fromRGB(20,20,25)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
 
-local title = Instance.new("TextLabel")
-title.Text = "Fishing & Teleport GUI"
-title.Font = Enum.Font.GothamBold
-title.TextSize = 19
-title.TextColor3 = Color3.new(1,1,1)
-title.BackgroundTransparency = 1
-title.Size = UDim2.new(1, -80, 1, 0)
-title.Position = UDim2.new(0, 12, 0, 0)
-title.Parent = titleBar
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Name = "Title"
+titleLabel.Size = UDim2.new(1,-190,1,0)
+titleLabel.Position = UDim2.new(0,10,0,0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Specific Ores"
+titleLabel.TextColor3 = Color3.fromRGB(220,220,220)
+titleLabel.TextScaled = true
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.TextXAlignment = Enum.TextXAlignment.Left
+titleLabel.Parent = titleBar
 
-local minBtn = Instance.new("TextButton")
-minBtn.Text = "_"
-minBtn.Size = UDim2.new(0, 38, 1, 0)
-minBtn.Position = UDim2.new(1, -76, 0, 0)
-minBtn.Font = Enum.Font.GothamBold
-minBtn.TextSize = 28
-minBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
-minBtn.TextColor3 = Color3.new(1,1,1)
-minBtn.Parent = titleBar
+local minimizeBtn = Instance.new("TextButton")
+minimizeBtn.Name = "Minimize"
+minimizeBtn.Size = UDim2.new(0,30,0,24)
+minimizeBtn.Position = UDim2.new(1,-36,0,5)
+minimizeBtn.BackgroundColor3 = Color3.fromRGB(40,40,45)
+minimizeBtn.Text = "-"
+minimizeBtn.Font = Enum.Font.GothamBold
+minimizeBtn.TextColor3 = Color3.fromRGB(200,200,200)
+minimizeBtn.TextScaled = true
+minimizeBtn.Parent = titleBar
 
-local maxBtn = Instance.new("TextButton")
-maxBtn.Text = "⬜"
-maxBtn.Size = UDim2.new(0, 38, 1, 0)
-maxBtn.Position = UDim2.new(1, -38, 0, 0)
-maxBtn.Font = Enum.Font.GothamBold
-maxBtn.TextSize = 22
-maxBtn.BackgroundColor3 = Color3.fromRGB(80,80,80)
-maxBtn.TextColor3 = Color3.new(1,1,1)
-maxBtn.Parent = titleBar
+-- search box in corner
+local searchBox = Instance.new("TextBox")
+searchBox.Name = "SearchBox"
+searchBox.Size = UDim2.new(0,140,0,22)
+searchBox.Position = UDim2.new(1,-250,0,6)
+searchBox.PlaceholderText = "Search ores..."
+searchBox.BackgroundColor3 = Color3.fromRGB(50,50,55)
+searchBox.Text = ""
+searchBox.Font = Enum.Font.Gotham
+searchBox.TextSize = 14
+searchBox.TextColor3 = Color3.fromRGB(230,230,230)
+searchBox.Parent = titleBar
+searchBox.ClearTextOnFocus = false
 
-local minimized = false
+local clearSearchBtn = Instance.new("TextButton")
+clearSearchBtn.Name = "ClearSearch"
+clearSearchBtn.Size = UDim2.new(0,22,0,22)
+clearSearchBtn.Position = UDim2.new(1,-106,0,6)
+clearSearchBtn.BackgroundColor3 = Color3.fromRGB(60,60,65)
+clearSearchBtn.Text = "X"
+clearSearchBtn.Font = Enum.Font.GothamBold
+clearSearchBtn.TextSize = 14
+clearSearchBtn.TextColor3 = Color3.fromRGB(220,220,220)
+clearSearchBtn.Parent = titleBar
 
-local tabBtnHolder = Instance.new("Frame")
-tabBtnHolder.Size = UDim2.new(1, 0, 0, 38)
-tabBtnHolder.Position = UDim2.new(0,0,0,38)
-tabBtnHolder.BackgroundTransparency = 1
-tabBtnHolder.Parent = window
+local toggleCountsBtn = Instance.new("TextButton")
+toggleCountsBtn.Name = "ToggleCounts"
+toggleCountsBtn.Size = UDim2.new(0,80,0,22)
+toggleCountsBtn.Position = UDim2.new(1,-130,0,6)
+toggleCountsBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
+toggleCountsBtn.Text = "Counts: On"
+toggleCountsBtn.Font = Enum.Font.Gotham
+toggleCountsBtn.TextSize = 14
+toggleCountsBtn.TextColor3 = Color3.fromRGB(220,220,220)
+toggleCountsBtn.Parent = titleBar
 
-local tabNames = {"Fishing", "Sell Teleport", "Zone Teleport", "Boss Teleport"}
-local tabs = {}
-local tabBtns = {}
-for i, tabName in ipairs(tabNames) do
-    local btn = Instance.new("TextButton")
-    btn.Text = tabName
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 16
-    btn.Size = UDim2.new(0, 105, 1, 0)
-    btn.Position = UDim2.new(0, (i-1)*105, 0, 0)
-    btn.BackgroundColor3 = Color3.fromRGB(65,65,65)
-    btn.TextColor3 = Color3.new(1,1,1)
-    btn.Parent = tabBtnHolder
-    tabBtns[i] = btn
+local contentFrame = Instance.new("Frame")
+contentFrame.Name = "Content"
+contentFrame.Size = UDim2.new(1,0,1,-34)
+contentFrame.Position = UDim2.new(0,0,0,34)
+contentFrame.BackgroundTransparency = 1
+contentFrame.Parent = mainFrame
 
-    local tab = Instance.new("Frame")
-    tab.Name = tabName:gsub(" ", "").."Tab"
-    tab.BackgroundTransparency = 1
-    tab.Size = UDim2.new(1, 0, 1, -76)
-    tab.Position = UDim2.new(0, 0, 0, 76)
-    tab.Visible = (i == 1)
-    tab.Parent = window
-    tabs[i] = tab
-end
+local scroll = Instance.new("ScrollingFrame")
+scroll.Name = "Scroll"
+scroll.Size = UDim2.new(1,-12,1,-12)
+scroll.Position = UDim2.new(0,6,0,6)
+scroll.CanvasSize = UDim2.new(0,0,0,0)
+scroll.BackgroundTransparency = 1
+scroll.ScrollBarThickness = 6
+scroll.Active = true
+scroll.Selectable = true
+scroll.Parent = contentFrame
 
-local function showTab(idx)
-    if minimized then return end
-    for i, tab in ipairs(tabs) do
-        tab.Visible = (i == idx)
+local layout = Instance.new("UIListLayout")
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Padding = UDim.new(0,6)
+layout.Parent = scroll
+
+layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    scroll.CanvasSize = UDim2.new(0,0,0,layout.AbsoluteContentSize.Y + 8)
+end)
+
+-- highlight adornment
+local currentHighlight = nil
+local function clearHighlight()
+    if currentHighlight and currentHighlight.Parent then
+        currentHighlight:Destroy()
     end
-    tabBtnHolder.Visible = true
+    currentHighlight = nil
 end
-for i, btn in ipairs(tabBtns) do
-    btn.MouseButton1Click:Connect(function()
-        showTab(i)
+local function createHighlight(part)
+    clearHighlight()
+    if not part or not part:IsA("BasePart") then return end
+    local box = Instance.new("BoxHandleAdornment")
+    box.Adornee = part
+    box.AlwaysOnTop = true
+    box.Size = part.Size + Vector3.new(0.08,0.08,0.08)
+    box.ZIndex = 10
+    -- attempt to use part.Color, fallback to white
+    box.Color = (part.Color and part.Color) or Color3.fromRGB(255,255,255)
+    box.Parent = game:GetService("CoreGui")
+    currentHighlight = box
+end
+
+-- teleport to nearest part of given name using partsByName map
+local function teleportToOre(oreName)
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+        player.CharacterAdded:Wait()
+        repeat task.wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    end
+    local hrp = player.Character.HumanoidRootPart
+    local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+    local entry = partsByName[oreName]
+    local nearest, nearestDist = nil, math.huge
+    if entry then
+        for part,_ in pairs(entry.parts) do
+            if part and part.Parent and part:IsA("BasePart") then
+                local dist = (hrp.Position - part.Position).Magnitude
+                if dist < nearestDist then
+                    nearest = part
+                    nearestDist = dist
+                end
+            end
+        end
+    end
+    if nearest then
+        if humanoid and humanoid.Sit then humanoid.Sit = false end
+        hrp.CFrame = nearest.CFrame + Vector3.new(0,6.5,0)
+        createHighlight(nearest)
+    else
+        clearHighlight()
+    end
+end
+
+-- create category and grid frames
+local function ensureCategoryExists(catName)
+    if scroll:FindFirstChild("Grid_" .. catName) then return end
+    categoriesCreated[catName] = true
+
+    local catFrame = Instance.new("Frame")
+    catFrame.Name = "Category_" .. catName
+    catFrame.Size = UDim2.new(1,-6,0,28)
+    catFrame.BackgroundTransparency = 1
+    catFrame.Parent = scroll
+
+    local catLabel = Instance.new("TextLabel")
+    catLabel.Size = UDim2.new(1,0,1,0)
+    catLabel.BackgroundTransparency = 1
+    catLabel.Text = catName
+    catLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    catLabel.Font = Enum.Font.GothamBold
+    catLabel.TextScaled = true
+    catLabel.Parent = catFrame
+
+    local grid = Instance.new("Frame")
+    grid.Name = "Grid_" .. catName
+    grid.Size = UDim2.new(1,0,0,0)
+    grid.BackgroundTransparency = 1
+    grid.Parent = scroll
+
+    local gridLayout = Instance.new("UIGridLayout")
+    gridLayout.CellSize = UDim2.new(0,110,0,36)
+    gridLayout.CellPadding = UDim2.new(0,6,0,6)
+    gridLayout.FillDirection = Enum.FillDirection.Horizontal
+    gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    gridLayout.Parent = grid
+
+    gridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        grid.Size = UDim2.new(1,0,0,gridLayout.AbsoluteContentSize.Y)
     end)
 end
 
-minBtn.MouseButton1Click:Connect(function()
-    minimized = true
-    for _, tab in ipairs(tabs) do tab.Visible = false end
-    tabBtnHolder.Visible = false
-    window.Size = UDim2.new(0,420,0,38)
-end)
-maxBtn.MouseButton1Click:Connect(function()
-    minimized = false
-    window.Size = UDim2.new(0,420,0,320)
-    tabBtnHolder.Visible = true
-    showTab(1)
-end)
-showTab(1)
+-- create button for a target ore (lazy)
+local function createButtonForOre(oreName)
+    if oreButtons[oreName] then return end
+    local cat = categorizeOre(oreName)
+    oreCategory[oreName] = cat
+    ensureCategoryExists(cat)
+    local grid = scroll:FindFirstChild("Grid_" .. cat)
+    if not grid then return end
 
--- Status function (updates ON/OFF color)
-local attractStatus, reelStatus
-local function updateStatus()
-    if attractStatus then
-        attractStatus.Text = attractActive and "ON" or "OFF"
-        attractStatus.TextColor3 = attractActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
+    local btn = Instance.new("TextButton")
+    btn.Name = "OreBtn_" .. oreName
+    btn.Size = UDim2.new(0,110,0,36)
+    btn.BackgroundColor3 = Color3.fromRGB(42,42,48)
+    btn.BorderSizePixel = 0
+    btn.Text = oreName
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 14
+    btn.TextColor3 = Color3.fromRGB(230,230,230)
+    btn.AutoButtonColor = true
+    btn.Parent = grid
+
+    local countLabel = Instance.new("TextLabel")
+    countLabel.Name = "Count"
+    countLabel.Size = UDim2.new(0,34,1,0)
+    countLabel.Position = UDim2.new(1,-36,0,0)
+    countLabel.BackgroundTransparency = 1
+    countLabel.Text = "0"
+    countLabel.Font = Enum.Font.Gotham
+    countLabel.TextSize = 14
+    countLabel.TextColor3 = Color3.fromRGB(170,170,170)
+    countLabel.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        teleportToOre(oreName)
+    end)
+
+    oreButtons[oreName] = { Button = btn, Count = countLabel }
+end
+
+-- update a button count, create button lazily if needed
+local function updateButtonCount(oreName)
+    local entry = partsByName[oreName]
+    local count = (entry and entry.count) or 0
+    local btnObj = oreButtons[oreName]
+    if not btnObj then
+        createButtonForOre(oreName)
+        btnObj = oreButtons[oreName]
     end
-    if reelStatus then
-        reelStatus.Text = reelActive and "ON" or "OFF"
-        reelStatus.TextColor3 = reelActive and Color3.fromRGB(60, 220, 110) or Color3.fromRGB(220, 60, 60)
+    if btnObj and btnObj.Count then
+        btnObj.Count.Text = tostring(count)
+        btnObj.Button.Active = count > 0
+        btnObj.Button.BackgroundColor3 = count > 0 and Color3.fromRGB(42,42,48) or Color3.fromRGB(28,28,30)
+        btnObj.Button.TextTransparency = count > 0 and 0 or 0.4
     end
 end
 
--- FISHING TAB
-local fishingTab = tabs[1]
+-- add part bookkeeping
+local function addPart(part)
+    if not part or not part.Name then return end
+    if not desiredSet[part.Name] then return end
+    partsByName[part.Name] = partsByName[part.Name] or { parts = {}, count = 0 }
+    if not partsByName[part.Name].parts[part] then
+        partsByName[part.Name].parts[part] = true
+        partsByName[part.Name].count = partsByName[part.Name].count + 1
+    end
 
-local attractBtn = Instance.new("TextButton")
-attractBtn.Text = "Instant Attract Fish"
-attractBtn.Font = Enum.Font.GothamBold
-attractBtn.TextSize = 16
-attractBtn.Size = UDim2.new(0, 240, 0, 40)
-attractBtn.Position = UDim2.new(0, 25, 0, 35)
-attractBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 90)
-attractBtn.TextColor3 = Color3.new(1,1,1)
-attractBtn.Parent = fishingTab
+    -- track ancestry so if the part is removed from world we clean up
+    if not partConnections[part] then
+        partConnections[part] = part.AncestryChanged:Connect(function(_, parent)
+            if not parent then
+                -- cleanup on removal
+                if partsByName[part.Name] and partsByName[part.Name].parts[part] then
+                    partsByName[part.Name].parts[part] = nil
+                    partsByName[part.Name].count = math.max(0, partsByName[part.Name].count - 1)
+                    updateButtonCount(part.Name)
+                end
+                if partConnections[part] then
+                    partConnections[part]:Disconnect()
+                    partConnections[part] = nil
+                end
+            end
+        end)
+    end
+    updateButtonCount(part.Name)
+end
 
-attractStatus = Instance.new("TextLabel")
-attractStatus.Size = UDim2.new(0, 50, 0, 40)
-attractStatus.Position = UDim2.new(0, 275, 0, 35)
-attractStatus.Text = "OFF"
-attractStatus.Font = Enum.Font.GothamBold
-attractStatus.TextSize = 16
-attractStatus.BackgroundTransparency = 1
-attractStatus.TextColor3 = Color3.fromRGB(220,60,60)
-attractStatus.Parent = fishingTab
+local function removePartRecord(part)
+    if not part or not part.Name then return end
+    if partsByName[part.Name] and partsByName[part.Name].parts[part] then
+        partsByName[part.Name].parts[part] = nil
+        partsByName[part.Name].count = math.max(0, partsByName[part.Name].count - 1)
+        updateButtonCount(part.Name)
+    end
+    if partConnections[part] then
+        partConnections[part]:Disconnect()
+        partConnections[part] = nil
+    end
+end
 
-local reelBtn = Instance.new("TextButton")
-reelBtn.Text = "Instant Reel"
-reelBtn.Font = Enum.Font.GothamBold
-reelBtn.TextSize = 16
-reelBtn.Size = UDim2.new(0, 240, 0, 40)
-reelBtn.Position = UDim2.new(0, 25, 0, 85)
-reelBtn.BackgroundColor3 = Color3.fromRGB(60, 130, 250)
-reelBtn.TextColor3 = Color3.new(1,1,1)
-reelBtn.Parent = fishingTab
+-- Initial "instant" check: single pass of mineFolder children, only looking for desired names.
+-- This is fast because we check membership on each child and only record matches.
+local function instantInitialScan()
+    local children = mineFolder:GetChildren()
+    for _, child in ipairs(children) do
+        if child:IsA("BasePart") and desiredSet[child.Name] then
+            addPart(child)
+        end
+    end
+    -- After scanning, ensure UI buttons exist for all masterOreList (shows those with count 0)
+    for _, name in ipairs(masterOreList) do
+        createButtonForOre(name)
+        updateButtonCount(name)
+    end
+end
 
-reelStatus = Instance.new("TextLabel")
-reelStatus.Size = UDim2.new(0, 50, 0, 40)
-reelStatus.Position = UDim2.new(0, 275, 0, 85)
-reelStatus.Text = "OFF"
-reelStatus.Font = Enum.Font.GothamBold
-reelStatus.TextSize = 16
-reelStatus.BackgroundTransparency = 1
-reelStatus.TextColor3 = Color3.fromRGB(220,60,60)
-reelStatus.Parent = fishingTab
+-- ChildAdded/ChildRemoved handlers give instant updates after initial scan
+mineFolder.ChildAdded:Connect(function(child)
+    if child and child:IsA("BasePart") and desiredSet[child.Name] then
+        addPart(child)
+    end
+end)
+mineFolder.ChildRemoved:Connect(function(child)
+    if child and child:IsA("BasePart") and desiredSet[child.Name] then
+        -- removal may already be handled via AncestryChanged, but handle just in case
+        removePartRecord(child)
+    end
+end)
 
-local info = Instance.new("TextLabel")
-info.Text = "Press the buttons above to instantly attract fish or reel in.\n(C and R hotkeys still work)"
-info.Font = Enum.Font.Gotham
-info.TextSize = 14
-info.Size = UDim2.new(1, -20, 0, 40)
-info.Position = UDim2.new(0, 10, 0, 135)
-info.TextColor3 = Color3.new(1,1,1)
-info.BackgroundTransparency = 1
-info.Parent = fishingTab
-
-updateStatus()
-
--- Sell/Zone/Boss Tabs (scrollable)
-local function populateTeleportTab(tab, src, color)
-    local scroll = Instance.new("ScrollingFrame")
-    scroll.Size = UDim2.new(1, -20, 1, -20)
-    scroll.Position = UDim2.new(0, 10, 0, 10)
-    scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    scroll.BackgroundTransparency = 1
-    scroll.ScrollBarThickness = 8
-    scroll.Parent = tab
-
-    local layout = Instance.new("UIListLayout")
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-    layout.Padding = UDim.new(0, 6)
-    layout.Parent = scroll
-
-    if src then
-        for _, obj in pairs(src:GetChildren()) do
-            if obj:IsA("BasePart") or obj:IsA("Model") then
-                local btn = Instance.new("TextButton")
-                btn.Size = UDim2.new(1, -10, 0, 35)
-                btn.Text = "Teleport to "..obj.Name
-                btn.BackgroundColor3 = color
-                btn.TextColor3 = Color3.new(1,1,1)
-                btn.Font = Enum.Font.Gotham
-                btn.TextSize = 16
-                btn.Parent = scroll
-                btn.MouseButton1Click:Connect(function()
-                    local char = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-                    if obj:IsA("BasePart") then
-                        char:MoveTo(obj.Position)
-                    elseif obj:IsA("Model") and obj.PrimaryPart then
-                        char:MoveTo(obj.PrimaryPart.Position)
-                    else
-                        local part = obj:FindFirstChildWhichIsA("BasePart")
-                        if part then
-                            char:MoveTo(part.Position)
-                        end
-                    end
-                end)
+-- Rare fallback full-scan (infrequent) in case some changes are missed; defaults to every 30s
+local FALLBACK_SCAN_INTERVAL = 30
+task.spawn(function()
+    while true do
+        task.wait(FALLBACK_SCAN_INTERVAL)
+        -- build set of currently found desired parts
+        local found = {}
+        for _, child in ipairs(mineFolder:GetChildren()) do
+            if child:IsA("BasePart") and desiredSet[child.Name] then
+                found[child] = true
+                if not (partsByName[child.Name] and partsByName[child.Name].parts[child]) then
+                    addPart(child)
+                end
             end
         end
-        wait() -- Allow UIListLayout to update
-        scroll.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 12)
+        -- remove any parts we think exist that were not found
+        for name, entry in pairs(partsByName) do
+            for p,_ in pairs(entry.parts) do
+                if not found[p] then
+                    removePartRecord(p)
+                end
+            end
+        end
+    end
+end)
+
+-- Build UI buttons for all target ores in small batches to avoid blocking
+local function buildAllButtonsBatched(list, batchSize)
+    batchSize = batchSize or 20
+    local i = 1
+    while i <= #list do
+        local last = math.min(#list, i + batchSize - 1)
+        for j = i, last do
+            createButtonForOre(list[j])
+            updateButtonCount(list[j])
+        end
+        task.wait()
+        i = last + 1
+    end
+end
+
+-- initial UI + instant scan
+buildAllButtonsBatched(masterOreList, 20)
+instantInitialScan()
+
+-- throttled refresh (only updates counts on known oreButtons if needed)
+local REFRESH_INTERVAL = 1.0
+local elapsed = 0
+RunService.Heartbeat:Connect(function(dt)
+    elapsed = elapsed + dt
+    if elapsed >= REFRESH_INTERVAL then
+        elapsed = 0
+        for name,_ in pairs(oreButtons) do
+            updateButtonCount(name)
+        end
+    end
+end)
+
+-- search/filter logic (small debounce)
+local function applySearch(q)
+    q = (q or ""):lower()
+    for name, obj in pairs(oreButtons) do
+        local vis = (q == "") or (name:lower():find(q,1,true) ~= nil)
+        if obj and obj.Button then
+            obj.Button.Visible = vis
+        end
+    end
+    -- hide categories if none of their children visible
+    for cat, _ in pairs(categoriesCreated) do
+        local grid = scroll:FindFirstChild("Grid_" .. cat)
+        local catFrame = scroll:FindFirstChild("Category_" .. cat)
+        if grid and catFrame then
+            local any = false
+            for _, child in ipairs(grid:GetChildren()) do
+                if child:IsA("TextButton") and child.Visible then
+                    any = true; break
+                end
+            end
+            grid.Visible = any
+            catFrame.Visible = any
+        end
+    end
+end
+
+local lastSearch = ""
+local function scheduleSearch(text)
+    lastSearch = text
+    task.delay(0.12, function()
+        if searchBox.Text == lastSearch then
+            applySearch(lastSearch)
+        end
+    end)
+end
+
+searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    scheduleSearch(searchBox.Text)
+end)
+searchBox.FocusLost:Connect(function()
+    applySearch(searchBox.Text)
+end)
+clearSearchBtn.MouseButton1Click:Connect(function()
+    searchBox.Text = ""
+    applySearch("")
+end)
+
+toggleCountsBtn.MouseButton1Click:Connect(function()
+    local showing = (toggleCountsBtn.Text == "Counts: On")
+    showing = not showing
+    toggleCountsBtn.Text = showing and "Counts: On" or "Counts: Off"
+    for _,v in pairs(oreButtons) do
+        if v.Count then v.Count.Visible = showing end
+    end
+end)
+
+-- dragging main frame
+local dragging = false
+local dragInput, dragStart, startPos
+local function updatePosition(input)
+    local delta = input.Position - dragStart
+    mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+titleBar.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        updatePosition(input)
+    end
+end)
+
+-- minimize toggle
+local minimized = false
+local origSize = mainFrame.Size
+minimizeBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    if minimized then
+        TweenService:Create(mainFrame, TweenInfo.new(0.18), {Size = UDim2.new(origSize.X.Scale, origSize.X.Offset, 0, 34)}):Play()
+        contentFrame.Visible = false
     else
-        local txt = Instance.new("TextLabel")
-        txt.Text = "Nothing found!"
-        txt.Size = UDim2.new(1, -10, 0, 40)
-        txt.Font = Enum.Font.Gotham
-        txt.TextColor3 = Color3.fromRGB(200,50,50)
-        txt.BackgroundTransparency = 1
-        txt.Parent = scroll
-        scroll.CanvasSize = UDim2.new(0, 0, 0, 50)
+        contentFrame.Visible = true
+        TweenService:Create(mainFrame, TweenInfo.new(0.18), {Size = origSize}):Play()
     end
-end
-populateTeleportTab(tabs[2], workspace:FindFirstChild("GameStalls"), Color3.fromRGB(120,90,90))
-populateTeleportTab(tabs[3], workspace:FindFirstChild("Zones"), Color3.fromRGB(90,120,90))
-populateTeleportTab(tabs[4], ReplicatedStorage:FindFirstChild("Assets") and ReplicatedStorage.Assets:FindFirstChild("BossEvent"), Color3.fromRGB(90,90,120))
+end)
 
--- INSTANT FISH LOGIC
-local rng = Random.new()
-local function doInstantAttract()
-    attractActive = true
-    updateStatus()
-    -- Simulate all fish being caught instantly for your net
-    for i = 1, FISH_PER_NET do
-        local fishType = FISH_TYPES[((i - 1) % #FISH_TYPES) + 1]
-        local floatValue = FLOATS[((i - 1) % #FLOATS) + 1]
-        local args = {
-            {
-                {
-                    "FishCaptureEffect",
-                    {
-                        fishType,
-                        floatValue,
-                        FISH_VECTOR,
-                        USER_ID
-                    }
-                },
-                "!"
-            }
-        }
-        remote:FireServer(unpack(args))
-        wait(0.1)
+-- random hotkey teleport (kept for convenience)
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.Nine then
+        local available = {}
+        for name,entry in pairs(partsByName) do
+            if entry and entry.count and entry.count > 0 then table.insert(available, name) end
+        end
+        if #available > 0 then
+            teleportToOre(available[math.random(1,#available)])
+        end
     end
-    attractActive = false
-    updateStatus()
-end
+end)
 
-local function doInstantReel()
-    reelActive = true
-    updateStatus()
-    -- Instantly do all reel clicks
-    for i = 1, TOTAL_REEL_PRESSES do
-        local args = {
-            {1, "9"}
-        }
-        remote:FireServer(unpack(args))
-        wait(0.05) -- safe delay (20/s)
-    end
-    reelActive = false
-    updateStatus()
-end
-
-attractBtn.MouseButton1Click:Connect(doInstantAttract)
-reelBtn.MouseButton1Click:Connect(doInstantReel)
-
-game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
-    if processed then return end
-    if input.KeyCode == Enum.KeyCode.C then
-        doInstantAttract()
-    elseif input.KeyCode == Enum.KeyCode.R then
-        doInstantReel()
+-- cleanup on script destroy
+script.Destroying:Connect(function()
+    clearHighlight()
+    for p,conn in pairs(partConnections) do
+        if conn and conn.Disconnect then conn:Disconnect() end
     end
 end)
