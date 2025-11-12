@@ -18,22 +18,25 @@ local playerGui = player:WaitForChild("PlayerGui")
 local workspace = game:GetService("Workspace")
 local mineFolder = workspace:FindFirstChild("Mine") or workspace:WaitForChild("Mine")
 
--- === Target ore list (from the screenshots you provided) ===
+-- === Target ore list (from all screenshots you provided) ===
 local masterOreList = {
-    -- image 1 / 4 (original)
+    -- original set (images 1-4)
     "Empress of Light","Idolium","Scribbal","Terratomere","Endozivite","Inclementite","Illusory Bubblegram","Nyctophyte","Dynamo of Fate","Machina","Chrysalis",
-    -- image 2 (original)
     "Gargantium","Musereign","Magnetyx","Ω","Ravenmare","Bulbalescense","Candilium","Elbrus' Pride","Vaporwave Crystal","Glitzar",
-    -- image 3 (original)
     "Cerlustrium","Polarium","Cybernetium","Eclipsicle","Elementium","Runealith","Gradience","Inkonium","Dyronsinite","Krampus' Seal",
-    -- image 4 (original)
     "Luminatite","Sentient Viscera","Erodimium","Exoretic","Lucidium","Pastelorium","Albinite","Visteorite","π","Void Reaver",
 
-    -- image 7-10: added names from your latest screenshots
+    -- added from images 7-10 (your earlier request)
     "Aether","Cleopatrite","Vulkavium","Scarfyte","Azuryl","Xynarium","Speatrium","Quandrium","Glacielle","Trinitium",
     "Formidulus","Elegascene","Emberstyx","Euclideum","Ophanim","Hallowed Prism","Altovite","Suncindium","Pasivium","Spristium",
     "Acceleratium","Vitrilyx","Ornalium","Penumbrosia","Obscuralis","Oviridis","Antipathy","Bonfire","Nauticalis","Aquoralivis",
-    "Accretium","Astatine","Snoblinitium","Neptunium","Monocage","Combustal","Temporum","Polonium","Blazuine"
+    "Accretium","Astatine","Snoblinitium","Neptunium","Monocage","Combustal","Temporum","Polonium","Blazuine",
+
+    -- finally added from images 11-14 (your latest request)
+    "Teslarium","Elexinite","Photoprisma","Thundarian","Exolite","Aegistone",
+    "Vanadinite","Erythrite","Eluxant","Antiquite","Superunobtainium","Cryotic","Solarite","Zefendium","Alternium","Viverra",
+    "Purpurite","Eluryan","Rainbonite","Elysian","Elusium","Promethium","Rusticog","Heliostra","Prismatica","Jet",
+    "Divinessence","Intoxium","Tanzanite","Theiograph","Spatializine"
 }
 
 -- Make a set for quick membership checks
@@ -193,7 +196,6 @@ local function createHighlight(part)
     box.AlwaysOnTop = true
     box.Size = part.Size + Vector3.new(0.08,0.08,0.08)
     box.ZIndex = 10
-    -- attempt to use part.Color, fallback to white
     box.Color = (part.Color and part.Color) or Color3.fromRGB(255,255,255)
     box.Parent = game:GetService("CoreGui")
     currentHighlight = box
