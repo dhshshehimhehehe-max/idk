@@ -1,11 +1,6 @@
 -- TeleportSpecificOres.lua
--- LocalScript: same UI layout but now with an Auto Teleport / Auto-Mine tab
--- Behavior:
---  - Builds a draggable, minimizable, scrollable UI with search/counts.
---  - Performs an immediate single pass to detect any of the target ores present now.
---  - Then relies on ChildAdded/ChildRemoved + AncestryChanged for instantaneous updates.
---  - A very infrequent fallback scan runs to catch rare edge-cases.
---  - New "Auto" tab: select an ore to auto-teleport to when it spawns; optional auto-mine tries to equip & activate a tool repeatedly.
+-- LocalScript: same UI layout with Auto TP/Mine tab, fix minimize, add "Stone" for testing,
+-- and add "Auto TP first detected (all ores)" / "Select All" behavior.
 -- Place this under StarterGui (LocalScript) so it runs for the LocalPlayer.
 
 local Players = game:GetService("Players")
@@ -39,6 +34,15 @@ local masterOreList = {
     "Purpurite","Eluryan","Rainbonite","Elysian","Elusium","Promethium","Rusticog","Heliostra","Prismatica","Jet",
     "Divinessence","Intoxium","Tanzanite","Theiograph","Spatializine"
 }
+
+-- Ensure "Stone" is present for testing
+local function includeTestOre(name)
+    for _, v in ipairs(masterOreList) do
+        if v == name then return end
+    end
+    table.insert(masterOreList, 1, name) -- put at start so easy to find
+end
+includeTestOre("Stone")
 
 -- Make a set for quick membership checks
 local desiredSet = {}
@@ -87,6 +91,9 @@ mainFrame.BackgroundColor3 = Color3.fromRGB(30,30,35)
 mainFrame.BorderSizePixel = 0
 mainFrame.Parent = gui
 mainFrame.Active = true
+
+-- Store original size for minimize/restore
+local originalSize = mainFrame.Size
 
 local titleBar = Instance.new("Frame")
 titleBar.Name = "TitleBar"
@@ -164,7 +171,6 @@ tabBar.Parent = mainFrame
 
 local oresTabBtn = Instance.new("TextButton")
 oresTabBtn.Name = "OresTab"
-oresTabBtn.Size = UDim2.new(0, 0, 1, 0)
 oresTabBtn.Size = UDim2.new(0.5, -6, 1, -6)
 oresTabBtn.Position = UDim2.new(0, 6, 0, 3)
 oresTabBtn.Text = "Ores"
@@ -243,6 +249,7 @@ local function makeLabel(text)
 end
 
 makeLabel("Auto teleport & mine")
+
 -- Ore selection scrolling list inside autoPanel
 local oreSelectScroll = Instance.new("ScrollingFrame")
 oreSelectScroll.Size = UDim2.new(1, 0, 0, 160)
@@ -261,7 +268,7 @@ end)
 
 -- auto options frame
 local autoOptionsFrame = Instance.new("Frame")
-autoOptionsFrame.Size = UDim2.new(1, 0, 0, 120)
+autoOptionsFrame.Size = UDim2.new(1, 0, 0, 160)
 autoOptionsFrame.BackgroundTransparency = 1
 autoOptionsFrame.Parent = autoPanel
 
@@ -288,6 +295,24 @@ autoMineToggle.TextSize = 14
 autoMineToggle.BackgroundColor3 = Color3.fromRGB(45,45,50)
 autoMineToggle.TextColor3 = Color3.fromRGB(220,220,220)
 autoMineToggle.Parent = autoOptionsFrame
+
+local autoFirstToggle = Instance.new("TextButton")
+autoFirstToggle.Size = UDim2.new(1, 0, 0, 28)
+autoFirstToggle.Text = "Auto TP First Detected (All ores): Off"
+autoFirstToggle.Font = Enum.Font.Gotham
+autoFirstToggle.TextSize = 14
+autoFirstToggle.BackgroundColor3 = Color3.fromRGB(45,45,50)
+autoFirstToggle.TextColor3 = Color3.fromRGB(220,220,220)
+autoFirstToggle.Parent = autoOptionsFrame
+
+local selectAllBtn = Instance.new("TextButton")
+selectAllBtn.Size = UDim2.new(1, 0, 0, 28)
+selectAllBtn.Text = "Select All (use for testing / mark ALL)"
+selectAllBtn.Font = Enum.Font.Gotham
+selectAllBtn.TextSize = 14
+selectAllBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
+selectAllBtn.TextColor3 = Color3.fromRGB(220,220,220)
+selectAllBtn.Parent = autoOptionsFrame
 
 local toolNameBox = Instance.new("TextBox")
 toolNameBox.Size = UDim2.new(1, 0, 0, 24)
@@ -319,7 +344,7 @@ jumpToFoundBtn.TextColor3 = Color3.fromRGB(220,220,220)
 jumpToFoundBtn.Parent = autoOptionsFrame
 
 -- helper: create ore select buttons (radio behavior)
-local selectedAutoOre = masterOreList[1]
+local selectedAutoOre = "Stone" -- default to Stone for testing
 
 local function createOreSelectButton(oreName)
     local btn = Instance.new("TextButton")
@@ -342,10 +367,11 @@ local function createOreSelectButton(oreName)
         end
         btn.BackgroundColor3 = Color3.fromRGB(90,90,95)
     end)
-    -- set initial selection highlight
+    -- initial highlight if matches
     if oreName == selectedAutoOre then
         btn.BackgroundColor3 = Color3.fromRGB(90,90,95)
     end
+    return btn
 end
 
 -- populate ore selection list in batches (to avoid freeze)
@@ -362,7 +388,7 @@ task.spawn(function()
     end
 end)
 
--- highlight adornment
+-- highlight adornment helpers
 local currentHighlight = nil
 local function clearHighlight()
     if currentHighlight and currentHighlight.Parent then
@@ -570,10 +596,31 @@ local function instantInitialScan()
     end
 end
 
+-- Auto control state
+local autoTeleportEnabled = false
+local autoMineEnabled = false
+local autoFirstEnabled = false -- new: auto TP to first detected across all ores
+local mineCoroutine = nil
+local autoCoroutine = nil
+
 -- ChildAdded/ChildRemoved handlers give instant updates after initial scan
 mineFolder.ChildAdded:Connect(function(child)
     if child and child:IsA("BasePart") and desiredSet[child.Name] then
         addPart(child)
+        -- instant auto behavior:
+        if autoFirstEnabled and autoTeleportEnabled then
+            -- teleport to first detected (this child)
+            teleportToOre(child.Name)
+            -- optionally start mining
+            if autoMineEnabled and not mineCoroutine then
+                -- mining coroutine started by toggle handlers; but kick it if needed
+            end
+        else
+            -- if selectedAutoOre matches, also trigger
+            if child.Name == selectedAutoOre and autoTeleportEnabled then
+                teleportToOre(selectedAutoOre)
+            end
+        end
     end
 end)
 mineFolder.ChildRemoved:Connect(function(child)
@@ -587,7 +634,6 @@ local FALLBACK_SCAN_INTERVAL = 30
 task.spawn(function()
     while true do
         task.wait(FALLBACK_SCAN_INTERVAL)
-        -- build set of currently found desired parts
         local found = {}
         for _, child in ipairs(mineFolder:GetChildren()) do
             if child:IsA("BasePart") and desiredSet[child.Name] then
@@ -597,7 +643,6 @@ task.spawn(function()
                 end
             end
         end
-        -- remove any parts we think exist that were not found
         for name, entry in pairs(partsByName) do
             for p,_ in pairs(entry.parts) do
                 if not found[p] then
@@ -649,7 +694,6 @@ local function applySearch(q)
             obj.Button.Visible = vis
         end
     end
-    -- hide categories if none of their children visible
     for cat, _ in pairs(categoriesCreated) do
         local grid = scroll:FindFirstChild("Grid_" .. cat)
         local catFrame = scroll:FindFirstChild("Category_" .. cat)
@@ -710,249 +754,166 @@ autoTabBtn.MouseButton1Click:Connect(function()
     autoTabBtn.BackgroundColor3 = Color3.fromRGB(50,50,55)
 end)
 
--- Auto logic
-local autoTeleportEnabled = false
-local autoMineEnabled = false
-local mineCoroutine = nil
-local autoCoroutine = nil
+-- Auto logic helpers
+local function findAndEquipToolByName(toolName)
+    if not toolName then return nil end
+    local backpack = player:FindFirstChildOfClass("Backpack")
+    local char = player.Character
+    if char then
+        for _, obj in ipairs(char:GetChildren()) do
+            if obj:IsA("Tool") and obj.Name == toolName then
+                return obj
+            end
+        end
+    end
+    if backpack then
+        for _, obj in ipairs(backpack:GetChildren()) do
+            if obj:IsA("Tool") and obj.Name == toolName then
+                return obj
+            end
+        end
+    end
+    return nil
+end
 
+local function startMiningLoop()
+    if mineCoroutine then return end
+    mineCoroutine = coroutine.create(function()
+        while autoMineEnabled do
+            local entry = (selectedAutoOre == "ALL") and nil or partsByName[selectedAutoOre]
+            -- If autoFirstEnabled (auto-first across all), we'll mine selectedAutoOre only when it exists.
+            if selectedAutoOre == "ALL" then
+                -- pick any found ore (first in partsByName with count>0)
+                local foundName = nil
+                for name, en in pairs(partsByName) do
+                    if en.count and en.count > 0 then
+                        foundName = name
+                        break
+                    end
+                end
+                if foundName then
+                    teleportToOre(foundName)
+                else
+                    task.wait(0.5)
+                    continue
+                end
+            else
+                -- if selectedAutoOre has parts
+                if not (partsByName[selectedAutoOre] and partsByName[selectedAutoOre].count > 0) then
+                    task.wait(0.5)
+                    continue
+                end
+                teleportToOre(selectedAutoOre)
+            end
+
+            local toolName = tostring(toolNameBox.Text or "Pickaxe")
+            local interval = tonumber(mineIntervalBox.Text) or 0.35
+            local tool = findAndEquipToolByName(toolName)
+            if tool and tool.Parent ~= player.Character then
+                tool.Parent = player.Character
+            end
+            -- try to repeatedly activate tool while ore remains
+            while autoMineEnabled do
+                local targetName = selectedAutoOre
+                if selectedAutoOre == "ALL" then
+                    -- if ALl, target closest with parts
+                    local entryPick
+                    for name,en in pairs(partsByName) do
+                        if en.count and en.count > 0 then
+                            entryPick = name
+                            break
+                        end
+                    end
+                    targetName = entryPick
+                end
+                if not targetName or not (partsByName[targetName] and partsByName[targetName].count > 0) then
+                    break
+                end
+                tool = findAndEquipToolByName(toolName)
+                if tool and tool.Parent ~= player.Character then
+                    tool.Parent = player.Character
+                end
+                if tool and tool.Parent == player.Character then
+                    pcall(function()
+                        if tool.Activate then tool:Activate() end
+                    end)
+                end
+                task.wait(interval)
+            end
+            task.wait(0.25)
+        end
+        mineCoroutine = nil
+    end)
+    coroutine.resume(mineCoroutine)
+end
+
+-- Toggle handlers
 autoTeleportToggle.MouseButton1Click:Connect(function()
     autoTeleportEnabled = not autoTeleportEnabled
     autoTeleportToggle.Text = "Auto Teleport: " .. (autoTeleportEnabled and "On" or "Off")
     autoTeleportToggle.BackgroundColor3 = autoTeleportEnabled and Color3.fromRGB(70,50,50) or Color3.fromRGB(45,45,50)
-    -- start worker when toggled on
-    if autoTeleportEnabled and not autoCoroutine then
-        autoCoroutine = coroutine.create(function()
-            while autoTeleportEnabled or autoMineEnabled do
-                local entry = partsByName[selectedAutoOre]
-                if entry and entry.count and entry.count > 0 then
-                    teleportToOre(selectedAutoOre)
-                    -- if auto-mine enabled, kick off mine coroutine
-                    if autoMineEnabled and not mineCoroutine then
-                        -- start mining coroutine
-                        mineCoroutine = coroutine.create(function()
-                            -- try to equip tool
-                            local toolName = tostring(toolNameBox.Text or "Pickaxe")
-                            local interval = tonumber(mineIntervalBox.Text) or 0.35
-                            local function findAndEquip()
-                                local backpack = player:FindFirstChildOfClass("Backpack")
-                                local char = player.Character
-                                -- search Character then Backpack
-                                if char then
-                                    for _,obj in ipairs(char:GetChildren()) do
-                                        if obj:IsA("Tool") and obj.Name == toolName then
-                                            return obj
-                                        end
-                                    end
-                                end
-                                if backpack then
-                                    for _,obj in ipairs(backpack:GetChildren()) do
-                                        if obj:IsA("Tool") and obj.Name == toolName then
-                                            return obj
-                                        end
-                                    end
-                                end
-                                return nil
-                            end
-                            local tool = findAndEquip()
-                            if tool and tool.Parent ~= player.Character then
-                                -- equip by setting parent to character
-                                tool.Parent = player.Character
-                            end
-                            if not tool then
-                                -- try again later
-                                -- tool may not exist; we will keep trying while autoMineEnabled
-                            end
-                            -- mining loop: attempt Tool:Activate() if tool found
-                            while autoMineEnabled do
-                                local foundEntry = partsByName[selectedAutoOre]
-                                if not (foundEntry and foundEntry.count and foundEntry.count > 0) then
-                                    break -- no more ores of this type
-                                end
-                                -- ensure character exists and tool is equipped
-                                if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
-                                    player.CharacterAdded:Wait()
-                                    repeat task.wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                                end
-                                tool = findAndEquip()
-                                if tool and tool.Parent ~= player.Character then
-                                    tool.Parent = player.Character
-                                end
-                                -- attempt to activate the tool (best-effort)
-                                if tool and tool.Parent == player.Character then
-                                    -- pcall in case Activate errors
-                                    pcall(function()
-                                        if tool.Activate then
-                                            tool:Activate()
-                                        end
-                                        -- some tools rely on RemoteEvents - not handled here
-                                    end)
-                                end
-                                -- Wait a little bit for mining to register / ore to get damaged/mined
-                                task.wait(interval)
-                            end
-                            mineCoroutine = nil
-                        end)
-                        coroutine.resume(mineCoroutine)
-                    end
-                end
-                task.wait(0.5) -- throttle check
-            end
-            autoCoroutine = nil
-        end)
-        coroutine.resume(autoCoroutine)
-    end
 end)
 
 autoMineToggle.MouseButton1Click:Connect(function()
     autoMineEnabled = not autoMineEnabled
     autoMineToggle.Text = "Auto Mine: " .. (autoMineEnabled and "On" or "Off")
     autoMineToggle.BackgroundColor3 = autoMineEnabled and Color3.fromRGB(70,50,50) or Color3.fromRGB(45,45,50)
-    -- if enabling and autoTeleport is off, still start mining when ore found (it will not teleport)
-    if (autoMineEnabled or autoTeleportEnabled) and not autoCoroutine then
-        autoCoroutine = coroutine.create(function()
-            while autoTeleportEnabled or autoMineEnabled do
-                local entry = partsByName[selectedAutoOre]
-                if entry and entry.count and entry.count > 0 then
-                    if autoTeleportEnabled then
-                        teleportToOre(selectedAutoOre)
-                    end
-                    -- kick off mine coroutine if enabled
-                    if autoMineEnabled and not mineCoroutine then
-                        mineCoroutine = coroutine.create(function()
-                            local toolName = tostring(toolNameBox.Text or "Pickaxe")
-                            local interval = tonumber(mineIntervalBox.Text) or 0.35
-                            local function findAndEquip()
-                                local backpack = player:FindFirstChildOfClass("Backpack")
-                                local char = player.Character
-                                if char then
-                                    for _,obj in ipairs(char:GetChildren()) do
-                                        if obj:IsA("Tool") and obj.Name == toolName then
-                                            return obj
-                                        end
-                                    end
-                                end
-                                if backpack then
-                                    for _,obj in ipairs(backpack:GetChildren()) do
-                                        if obj:IsA("Tool") and obj.Name == toolName then
-                                            return obj
-                                        end
-                                    end
-                                end
-                                return nil
-                            end
-                            local tool = findAndEquip()
-                            if tool and tool.Parent ~= player.Character then
-                                tool.Parent = player.Character
-                            end
-                            while autoMineEnabled do
-                                local foundEntry = partsByName[selectedAutoOre]
-                                if not (foundEntry and foundEntry.count and foundEntry.count > 0) then
-                                    break
-                                end
-                                if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
-                                    player.CharacterAdded:Wait()
-                                    repeat task.wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                                end
-                                tool = findAndEquip()
-                                if tool and tool.Parent ~= player.Character then
-                                    tool.Parent = player.Character
-                                end
-                                if tool and tool.Parent == player.Character then
-                                    pcall(function()
-                                        if tool.Activate then tool:Activate() end
-                                    end)
-                                end
-                                task.wait(tonumber(mineIntervalBox.Text) or 0.35)
-                            end
-                            mineCoroutine = nil
-                        end)
-                        coroutine.resume(mineCoroutine)
-                    end
-                end
-                task.wait(0.5)
-            end
-            autoCoroutine = nil
-        end)
-        coroutine.resume(autoCoroutine)
+    if autoMineEnabled then
+        startMiningLoop()
     end
 end)
 
--- jump to found now button
+autoFirstToggle.MouseButton1Click:Connect(function()
+    autoFirstEnabled = not autoFirstEnabled
+    autoFirstToggle.Text = "Auto TP First Detected (All ores): " .. (autoFirstEnabled and "On" or "Off")
+    autoFirstToggle.BackgroundColor3 = autoFirstEnabled and Color3.fromRGB(70,50,50) or Color3.fromRGB(45,45,50)
+end)
+
+selectAllBtn.MouseButton1Click:Connect(function()
+    selectedAutoOre = "ALL"
+    -- reset highlights in oreSelectScroll
+    for _, child in ipairs(oreSelectScroll:GetChildren()) do
+        if child:IsA("TextButton") then
+            child.BackgroundColor3 = Color3.fromRGB(60,60,65)
+        end
+    end
+    -- visually indicate the "ALL" selection by changing button text of selectAllBtn
+    selectAllBtn.BackgroundColor3 = Color3.fromRGB(90,90,95)
+end)
+
 jumpToFoundBtn.MouseButton1Click:Connect(function()
-    teleportToOre(selectedAutoOre)
-end)
-
--- create ore select buttons inside the main ore list as well (they already exist there)
--- (note: oreSelect list already created separately earlier)
-
--- utility: immediate teleport when ore added if it matches selectedAutoOre and autoTeleport is enabled
-local function onOreAddedInstant(part)
-    if not part or not part.Name then return end
-    if part.Name == selectedAutoOre then
-        if autoTeleportEnabled then
-            -- teleport
-            teleportToOre(selectedAutoOre)
-        end
-        if autoMineEnabled then
-            -- start mine coroutine if not already running
-            if not mineCoroutine then
-                mineCoroutine = coroutine.create(function()
-                    local toolName = tostring(toolNameBox.Text or "Pickaxe")
-                    local interval = tonumber(mineIntervalBox.Text) or 0.35
-                    local function findAndEquip()
-                        local backpack = player:FindFirstChildOfClass("Backpack")
-                        local char = player.Character
-                        if char then
-                            for _,obj in ipairs(char:GetChildren()) do
-                                if obj:IsA("Tool") and obj.Name == toolName then
-                                    return obj
-                                end
-                            end
-                        end
-                        if backpack then
-                            for _,obj in ipairs(backpack:GetChildren()) do
-                                if obj:IsA("Tool") and obj.Name == toolName then
-                                    return obj
-                                end
-                            end
-                        end
-                        return nil
-                    end
-                    local tool = findAndEquip()
-                    if tool and tool.Parent ~= player.Character then
-                        tool.Parent = player.Character
-                    end
-                    while autoMineEnabled do
-                        local foundEntry = partsByName[selectedAutoOre]
-                        if not (foundEntry and foundEntry.count and foundEntry.count > 0) then
-                            break
-                        end
-                        if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
-                            player.CharacterAdded:Wait()
-                            repeat task.wait() until player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-                        end
-                        tool = findAndEquip()
-                        if tool and tool.Parent ~= player.Character then
-                            tool.Parent = player.Character
-                        end
-                        if tool and tool.Parent == player.Character then
-                            pcall(function() if tool.Activate then tool:Activate() end end)
-                        end
-                        task.wait(tonumber(mineIntervalBox.Text) or 0.35)
-                    end
-                    mineCoroutine = nil
-                end)
-                coroutine.resume(mineCoroutine)
-            end
+    -- teleport to first found across all desired ores
+    local foundName = nil
+    for name, entry in pairs(partsByName) do
+        if entry.count and entry.count > 0 then
+            foundName = name
+            break
         end
     end
-end
+    if foundName then
+        teleportToOre(foundName)
+    end
+end)
 
--- Hook instant add to the global ChildAdded listener to call onOreAddedInstant as well
-mineFolder.ChildAdded:Connect(function(child)
-    if child and child:IsA("BasePart") and desiredSet[child.Name] then
-        onOreAddedInstant(child)
+-- jump to found now via ChildAdded immediate handler already implemented above
+
+-- minimize handling (fixed)
+minimizeBtn.MouseButton1Click:Connect(function()
+    local minimized = mainFrame:GetAttribute("minimized")
+    if minimized == nil then minimized = false end
+    minimized = not minimized
+    mainFrame:SetAttribute("minimized", minimized)
+    if minimized then
+        -- hide tab bar + content smoothly
+        tabBar.Visible = false
+        contentFrame.Visible = false
+        -- shrink to title height (34 + small)
+        local goal = { Size = UDim2.new(originalSize.X.Scale, originalSize.X.Offset, 0, 34) }
+        TweenService:Create(mainFrame, TweenInfo.new(0.18), goal):Play()
+    else
+        tabBar.Visible = true
+        contentFrame.Visible = true
+        TweenService:Create(mainFrame, TweenInfo.new(0.18), { Size = originalSize }):Play()
     end
 end)
 
@@ -970,4 +931,4 @@ script.Destroying:Connect(function()
     end
 end)
 
--- end of script
+-- End of script
